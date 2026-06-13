@@ -32,6 +32,10 @@ bin/
 
 run/
 
+# superpowers
+
+docs/superpowers/
+
 # java
 
 hs_err_*.log
