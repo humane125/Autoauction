@@ -1,0 +1,15 @@
+package com.autoauction.client.automation;
+
+public enum AutomationState {
+	STOPPED,
+	WATCHING_ARMOR,
+	THRESHOLD_REACHED,
+	STOPPING_MACRO,
+	REMOVING_ARMOR,
+	PRICING_ITEMS,
+	LISTING_ITEMS,
+	RETURNING_TO_HUB,
+	DISCONNECTING,
+	DONE,
+	ERROR
+}
