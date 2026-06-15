@@ -6,6 +6,7 @@ import com.autoauction.client.automation.AuctionAutomationController;
 import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.config.AutoAuctionConfigStore;
+import com.autoauction.client.control.ModSocketClient;
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.domain.AuctionBlockedMessageDetector;
@@ -37,10 +38,12 @@ public class AutoauctionClient implements ClientModInitializer {
 	private AuctionAutomationController controller;
 	private MinecraftGameActions actions;
 	private AuctionApiClient apiClient;
+	private ModSocketClient modSocketClient;
 	private DiscordNotifier notifier;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private boolean workflowStarted;
+	private boolean modSocketStarted;
 	private boolean dumpSlotsKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
 	private long lastCookieBuffAlertAt;
@@ -53,6 +56,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.controller = new AuctionAutomationController(config);
 			this.actions = new MinecraftGameActions();
 			this.apiClient = new AuctionApiClient(config);
+			this.modSocketClient = new ModSocketClient(config);
 			this.notifier = new DiscordNotifier(config);
 			registerCommands();
 			registerMessageHandlers();
@@ -63,6 +67,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
+				startModSocketIfNeeded(client);
 				if (realWorkflow != null) {
 					realWorkflow.tick(client);
 				}
@@ -78,6 +83,16 @@ public class AutoauctionClient implements ClientModInitializer {
 		} catch (Exception e) {
 			throw new IllegalStateException("Failed to initialize AutoAuction client", e);
 		}
+	}
+
+	private void startModSocketIfNeeded(Minecraft client) {
+		if (modSocketStarted || config.apiToken().isBlank() || client.player == null) {
+			return;
+		}
+		String clientVersion = FabricLoader.getInstance().getModContainer("autoauction")
+			.map(container -> container.getMetadata().getVersion().getFriendlyString())
+			.orElse("unknown");
+		modSocketStarted = modSocketClient.start(client.getUser().getName(), clientVersion);
 	}
 
 	private void registerMessageHandlers() {
