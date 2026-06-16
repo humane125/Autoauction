@@ -28,6 +28,15 @@ public final class DiscordNotifier {
 		send("info", "AutoAuction: " + message);
 	}
 
+	public void ban(String username, String reason) throws Exception {
+		String cleanUsername = String.valueOf(username == null ? "" : username).trim();
+		String cleanReason = String.valueOf(reason == null ? "" : reason).trim();
+		send("ban", mentionPrefix()
+			+ (cleanUsername.isBlank() ? "Minecraft account" : cleanUsername)
+			+ " has been banned\nReason: "
+			+ (cleanReason.isBlank() ? "Unknown" : cleanReason));
+	}
+
 	private String mentionPrefix() {
 		return config.discordMentionUserId().isBlank() ? "" : "<@" + config.discordMentionUserId() + "> ";
 	}

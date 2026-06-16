@@ -121,6 +121,24 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void invokesDisconnectHandlerWhenServerSendsDisconnectNow() {
+		FakeTransport transport = new FakeTransport();
+		List<String> disconnectReasons = new ArrayList<>();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000, message -> {}, disconnectReasons::add);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		transport.message("{\"type\":\"disconnect_now\",\"reason\":\"Ban detected on BannedPlayer\"}");
+
+		assertEquals(List.of("Ban detected on BannedPlayer"), disconnectReasons);
+		client.close();
+	}
+
+	@Test
 	void logsWebSocketLifecycleWithoutLeakingApiKey() throws Exception {
 		FakeTransport transport = new FakeTransport();
 		List<String> logs = new ArrayList<>();

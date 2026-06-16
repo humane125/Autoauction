@@ -67,7 +67,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.controller = new AuctionAutomationController(config);
 			this.actions = new MinecraftGameActions();
 			this.apiClient = new AuctionApiClient(config);
-			this.modSocketClient = new ModSocketClient(config);
+			this.modSocketClient = new ModSocketClient(config, this::disconnectFromRemoteCommand);
 			this.notifier = new DiscordNotifier(config);
 			registerCommands();
 			registerMessageHandlers();
@@ -166,6 +166,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void reportModBanStatus(String text, String source) {
 		ModAccountStatusDetector.BanDetails details = ModAccountStatusDetector.parseHypixelBanDetails(text, Instant.now());
 		if (details.isBanned() && modSocketClient != null && modSocketClient.reportBan(details)) {
+			notifyBanAsync(Minecraft.getInstance().getUser().getName(), details.reason());
 			Autoauction.LOGGER.info(
 				"AutoAuction reported account status banned from {}. reason={} banId={} banUntil={}",
 				source,
@@ -174,6 +175,18 @@ public class AutoauctionClient implements ClientModInitializer {
 				details.banUntil()
 			);
 		}
+	}
+
+	private void disconnectFromRemoteCommand(String reason) {
+		Minecraft client = Minecraft.getInstance();
+		String disconnectReason = String.valueOf(reason == null ? "" : reason).isBlank()
+			? "AutoAuction remote disconnect requested."
+			: reason;
+		client.execute(() -> {
+			if (actions != null) {
+				actions.disconnect(client, disconnectReason);
+			}
+		});
 	}
 
 	private String screenText(Screen screen) {
@@ -888,6 +901,16 @@ public class AutoauctionClient implements ClientModInitializer {
 				notifier.info(message);
 			} catch (Exception e) {
 				Autoauction.LOGGER.error("AutoAuction Discord notification failed", e);
+			}
+		});
+	}
+
+	private void notifyBanAsync(String username, String reason) {
+		CompletableFuture.runAsync(() -> {
+			try {
+				notifier.ban(username, reason);
+			} catch (Exception e) {
+				Autoauction.LOGGER.error("AutoAuction Discord ban notification failed", e);
 			}
 		});
 	}

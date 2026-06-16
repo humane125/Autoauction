@@ -27,6 +27,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private final long heartbeatIntervalMs;
 	private final ScheduledExecutorService heartbeatExecutor;
 	private final Consumer<String> logSink;
+	private final Consumer<String> disconnectHandler;
 
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
@@ -34,18 +35,27 @@ public final class ModSocketClient implements AutoCloseable {
 	private String lastReportedStatus;
 
 	public ModSocketClient(AutoAuctionConfig config) {
-		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message));
+		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), reason -> {});
+	}
+
+	public ModSocketClient(AutoAuctionConfig config, Consumer<String> disconnectHandler) {
+		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), disconnectHandler);
 	}
 
 	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs) {
-		this(config, transport, heartbeatIntervalMs, message -> Autoauction.LOGGER.info(message));
+		this(config, transport, heartbeatIntervalMs, message -> Autoauction.LOGGER.info(message), reason -> {});
 	}
 
 	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs, Consumer<String> logSink) {
+		this(config, transport, heartbeatIntervalMs, logSink, reason -> {});
+	}
+
+	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs, Consumer<String> logSink, Consumer<String> disconnectHandler) {
 		this.config = config;
 		this.transport = transport;
 		this.heartbeatIntervalMs = heartbeatIntervalMs;
 		this.logSink = logSink;
+		this.disconnectHandler = disconnectHandler;
 		this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
 			Thread thread = new Thread(runnable, "autoauction-mod-socket-heartbeat");
 			thread.setDaemon(true);
@@ -112,7 +122,21 @@ public final class ModSocketClient implements AutoCloseable {
 		if (Objects.equals(type, "auth_ok")) {
 			sendStatus("active");
 			startHeartbeat();
+			return;
 		}
+		if (Objects.equals(type, "disconnect_now")) {
+			String reason = stringProperty(message, "reason", "AutoAuction remote disconnect requested.");
+			log("AutoAuction mod socket received disconnect_now: " + reason);
+			disconnectHandler.accept(reason);
+		}
+	}
+
+	private String stringProperty(JsonObject message, String name, String fallback) {
+		if (!message.has(name) || message.get(name).isJsonNull()) {
+			return fallback;
+		}
+		String value = message.get(name).getAsString();
+		return value == null || value.isBlank() ? fallback : value;
 	}
 
 	public synchronized boolean reportStatus(String status) {
