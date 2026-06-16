@@ -16,8 +16,10 @@
 }
 ```
 
-- After `auth_ok`, the mod sends heartbeat messages.
-- Added unit tests for socket URI conversion, auth payload, heartbeat behavior, and no-token behavior.
+- After `auth_ok`, the mod sends `{ "type": "active" }`, then heartbeats every 30 seconds.
+- The mod reports Hypixel joins as `{ "type": "hypixel" }` and Hypixel ban screens as `{ "type": "banned", "banReason": "...", "banId": "...", "banUntil": "..." }`.
+- When the Minecraft client is stopping or the socket client closes, the mod sends `{ "type": "offline" }` before closing the WebSocket. The API preserves active timed bans through that offline message.
+- Added unit tests for socket URI conversion, auth payload, active/offline/hypixel/banned status messages, heartbeat behavior, ban parsing, and no-token behavior.
 
 ## Config Needed
 
@@ -40,13 +42,13 @@ The API key should have:
 The mod project requires JDK 25. On this machine the installed path is:
 
 ```text
-C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot
+C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot
 ```
 
 Verification command:
 
 ```powershell
-$env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot'
+$env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-25.0.2.10-hotspot'
 $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 .\gradlew.bat --no-daemon test
 ```

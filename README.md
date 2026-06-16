@@ -25,7 +25,9 @@ When Minecraft starts and the player is available, the mod connects to:
 wss://<api-host>/api/mod/ws
 ```
 
-The first message authenticates with the API key and current Minecraft username. After the server confirms auth, the mod sends heartbeat messages so the dashboard can show the account as active or offline.
+The first message authenticates with the API key and current Minecraft username. After the server confirms auth, the mod sends `{ "type": "active" }`, sends `{ "type": "heartbeat" }` every 30 seconds, reports Hypixel joins and ban screens, and sends `{ "type": "offline" }` before the client socket closes. Timed Hypixel bans include reason, ban ID, and expiry metadata so the API can keep the account banned until the timer ends.
+
+WebSocket connection, auth, inbound messages, active/offline status, heartbeat, close, and error events are logged to Minecraft's `logs/latest.log`. The raw API key is not written to logs.
 
 ## License
 

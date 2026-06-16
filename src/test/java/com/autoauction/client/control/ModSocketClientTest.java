@@ -1,6 +1,7 @@
 package com.autoauction.client.control;
 
 import com.autoauction.client.config.AutoAuctionConfig;
+import com.autoauction.client.domain.ModAccountStatusDetector;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -10,6 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModSocketClientTest {
@@ -34,7 +36,7 @@ class ModSocketClientTest {
 	}
 
 	@Test
-	void sendsHeartbeatAfterAuthOk() throws Exception {
+	void sendsActiveAfterAuthOkThenHeartbeats() throws Exception {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
 			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
@@ -46,8 +48,119 @@ class ModSocketClientTest {
 		transport.message("{\"type\":\"auth_ok\"}");
 
 		assertEquals(URI.create("ws://127.0.0.1:3000/api/mod/ws"), transport.connectedUri);
+		assertTrue(transport.connection.sentMessages.get(1).contains("\"type\":\"active\""));
 		assertTrue(transport.connection.awaitMessage("\"type\":\"heartbeat\""));
 
+		client.close();
+	}
+
+	@Test
+	void sendsOfflineBeforeClosingAuthenticatedConnection() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		client.close();
+
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"offline\"")));
+		assertTrue(transport.connection.closed);
+	}
+
+	@Test
+	void sendsExplicitStatusUpdatesAfterAuthOk() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		client.reportStatus("hypixel");
+		client.reportStatus("banned");
+
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"hypixel\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"banned\"")));
+		client.close();
+	}
+
+	@Test
+	void sendsBanMetadataWithBannedStatus() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		client.reportBan(new ModAccountStatusDetector.BanDetails(
+			true,
+			"Cheating through the use of unfair game advantages.",
+			"#01346337",
+			2526362000L,
+			"2026-07-14T20:46:02Z"
+		));
+
+		String payload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"banned\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(payload.contains("\"banReason\":\"Cheating through the use of unfair game advantages.\""));
+		assertTrue(payload.contains("\"banId\":\"#01346337\""));
+		assertTrue(payload.contains("\"banUntil\":\"2026-07-14T20:46:02Z\""));
+		assertTrue(payload.contains("\"banDurationMs\":2526362000"));
+		client.close();
+	}
+
+	@Test
+	void logsWebSocketLifecycleWithoutLeakingApiKey() throws Exception {
+		FakeTransport transport = new FakeTransport();
+		List<String> logs = new ArrayList<>();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_secret_mod_key",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 1, logs::add);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		assertTrue(transport.connection.awaitMessage("\"type\":\"heartbeat\""));
+		client.close();
+
+		assertTrue(logs.stream().anyMatch(log -> log.contains("connecting")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("opened")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("sent auth")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("received auth_ok")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("sent active")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("heartbeat started")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("sent heartbeat")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("sent offline")));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("closed")));
+		assertFalse(String.join("\n", logs).contains("hpx_test_secret_mod_key"));
+	}
+
+	@Test
+	void logsWebSocketErrors() {
+		FakeTransport transport = new FakeTransport();
+		List<String> logs = new ArrayList<>();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000, logs::add);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.error(new IllegalStateException("server down"));
+
+		assertTrue(logs.stream().anyMatch(log -> log.contains("error") && log.contains("server down")));
 		client.close();
 	}
 
@@ -82,6 +195,10 @@ class ModSocketClientTest {
 
 		void message(String text) {
 			listener.onText(text);
+		}
+
+		void error(Throwable error) {
+			listener.onError(error);
 		}
 	}
 

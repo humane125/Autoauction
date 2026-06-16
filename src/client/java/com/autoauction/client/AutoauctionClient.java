@@ -11,6 +11,7 @@ import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.domain.AuctionBlockedMessageDetector;
 import com.autoauction.client.domain.AuctionItemRequestFactory;
+import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.minecraft.MinecraftGameActions;
@@ -18,14 +19,24 @@ import com.autoauction.client.notify.DiscordNotifier;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientLoginConnectionEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.network.Connection;
+import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
+import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -60,14 +71,21 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.notifier = new DiscordNotifier(config);
 			registerCommands();
 			registerMessageHandlers();
+			registerConnectionStatusHandlers();
+			ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+				if (modSocketClient != null) {
+					modSocketClient.close();
+				}
+			});
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
+				startModSocketIfNeeded(client);
+				reportConnectionStatus(client);
 				if (client.player == null || controller == null || actions == null) {
 					return;
 				}
 
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
-				startModSocketIfNeeded(client);
 				if (realWorkflow != null) {
 					realWorkflow.tick(client);
 				}
@@ -86,13 +104,154 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startModSocketIfNeeded(Minecraft client) {
-		if (modSocketStarted || config.apiToken().isBlank() || client.player == null) {
+		if (modSocketStarted || config.apiToken().isBlank()) {
 			return;
 		}
 		String clientVersion = FabricLoader.getInstance().getModContainer("autoauction")
 			.map(container -> container.getMetadata().getVersion().getFriendlyString())
 			.orElse("unknown");
 		modSocketStarted = modSocketClient.start(client.getUser().getName(), clientVersion);
+	}
+
+	private void reportConnectionStatus(Minecraft client) {
+		if (modSocketClient == null) {
+			return;
+		}
+		String screenText = screenText(client.screen);
+		if (ModAccountStatusDetector.isHypixelBanScreen(screenText)) {
+			reportModBanStatus(screenText, "screen");
+			return;
+		}
+		if (client.getCurrentServer() != null && ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+			reportModStatus("hypixel", "tick " + client.getCurrentServer().ip);
+			return;
+		}
+		reportModStatus("active", "tick");
+	}
+
+	private void registerConnectionStatusHandlers() {
+		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			ServerData serverData = handler.getServerData();
+			if (serverData != null && ModAccountStatusDetector.isHypixelServer(serverData.ip)) {
+				reportModStatus("hypixel", "play join " + serverData.ip);
+			}
+		});
+		ClientLoginConnectionEvents.DISCONNECT.register((handler, client) -> {
+			DisconnectionDetails details = disconnectionDetailsFrom(handler);
+			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
+				reportModBanStatus(details, "login disconnect");
+			}
+		});
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+			DisconnectionDetails details = connectionDisconnectionDetails(handler.getConnection());
+			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
+				reportModBanStatus(details, "play disconnect");
+			}
+		});
+	}
+
+	private void reportModStatus(String status, String source) {
+		if (modSocketClient != null && modSocketClient.reportStatus(status)) {
+			Autoauction.LOGGER.info("AutoAuction reported account status {} from {}.", status, source);
+		}
+	}
+
+	private void reportModBanStatus(DisconnectionDetails details, String source) {
+		if (details == null) {
+			return;
+		}
+		reportModBanStatus(details.reason().getString(), source);
+	}
+
+	private void reportModBanStatus(String text, String source) {
+		ModAccountStatusDetector.BanDetails details = ModAccountStatusDetector.parseHypixelBanDetails(text, Instant.now());
+		if (details.isBanned() && modSocketClient != null && modSocketClient.reportBan(details)) {
+			Autoauction.LOGGER.info(
+				"AutoAuction reported account status banned from {}. reason={} banId={} banUntil={}",
+				source,
+				details.reason(),
+				details.banId(),
+				details.banUntil()
+			);
+		}
+	}
+
+	private String screenText(Screen screen) {
+		if (screen == null) {
+			return "";
+		}
+		StringBuilder text = new StringBuilder(screen.getTitle().getString());
+		text.append('\n').append(screen.getNarrationMessage().getString());
+		Class<?> type = screen.getClass();
+		while (type != null && type != Object.class) {
+			for (Field field : type.getDeclaredFields()) {
+				try {
+					field.setAccessible(true);
+					appendScreenFieldText(text, field.get(screen));
+				} catch (ReflectiveOperationException | RuntimeException ignored) {
+					// Best-effort screen text extraction; title-only still keeps the game path safe.
+				}
+			}
+			type = type.getSuperclass();
+		}
+		return text.toString();
+	}
+
+	private DisconnectionDetails disconnectionDetailsFrom(Object value) {
+		if (value == null) {
+			return null;
+		}
+		if (value instanceof DisconnectionDetails details) {
+			return details;
+		}
+		if (value instanceof Connection connection) {
+			return connectionDisconnectionDetails(connection);
+		}
+		Class<?> type = value.getClass();
+		while (type != null && type != Object.class) {
+			for (Field field : type.getDeclaredFields()) {
+				try {
+					field.setAccessible(true);
+					Object fieldValue = field.get(value);
+					if (fieldValue instanceof DisconnectionDetails details) {
+						return details;
+					}
+					if (fieldValue instanceof Connection connection) {
+						DisconnectionDetails details = connectionDisconnectionDetails(connection);
+						if (details != null) {
+							return details;
+						}
+					}
+				} catch (ReflectiveOperationException | RuntimeException ignored) {
+					// Best-effort extraction from Minecraft listener internals.
+				}
+			}
+			type = type.getSuperclass();
+		}
+		return null;
+	}
+
+	private DisconnectionDetails connectionDisconnectionDetails(Connection connection) {
+		if (connection == null) {
+			return null;
+		}
+		try {
+			return connection.getDisconnectionDetails();
+		} catch (RuntimeException ignored) {
+			return null;
+		}
+	}
+
+	private void appendScreenFieldText(StringBuilder text, Object value) {
+		if (value instanceof Component component) {
+			text.append('\n').append(component.getString());
+		} else if (value instanceof DisconnectionDetails details) {
+			appendScreenFieldText(text, details.reason());
+		} else if (value instanceof Collection<?> collection) {
+			for (Object item : collection) {
+				appendScreenFieldText(text, item);
+			}
+		}
 	}
 
 	private void registerMessageHandlers() {
