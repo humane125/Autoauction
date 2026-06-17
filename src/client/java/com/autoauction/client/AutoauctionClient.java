@@ -9,6 +9,7 @@ import com.autoauction.client.config.AutoAuctionConfigStore;
 import com.autoauction.client.control.ModSocketClient;
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
+import com.autoauction.client.domain.ArmorStatusFormatter;
 import com.autoauction.client.domain.AuctionBlockedMessageDetector;
 import com.autoauction.client.domain.AuctionItemRequestFactory;
 import com.autoauction.client.domain.ModAccountStatusDetector;
@@ -319,6 +320,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			}))
 			.then(literal("status").executes(context -> {
 				sendFeedback(context.getSource(), statusMessage());
+				return 1;
+			}))
+			.then(literal("armor").executes(context -> {
+				EnumMap<ArmorPiece, ArmorSnapshot> armor = actions.readEquippedFinalDestinationArmor(context.getSource().getClient());
+				for (String line : ArmorStatusFormatter.format(armor, config.killThreshold())) {
+					sendFeedback(context.getSource(), line);
+				}
 				return 1;
 			}))
 			.then(literal("testtrigger").executes(context -> {
