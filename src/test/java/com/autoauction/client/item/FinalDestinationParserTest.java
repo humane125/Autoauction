@@ -31,6 +31,21 @@ class FinalDestinationParserTest {
 	}
 
 	@Test
+	void parsesFinalDestinationKillsFromNextUpgradeProgress() {
+		var result = parser.parse(ArmorPiece.CHESTPLATE, "\u00a76Fierce Final Destination Chestplate",
+			List.of(
+				"\u00a76Piece Bonus: Enderman Bulwark",
+				"\u00a77Kill Endermen to accumulate defense",
+				"\u00a77against them.",
+				"\u00a76Piece Bonus: \u00a7a+310\u2726",
+				"\u00a77Next Upgrade: \u00a7a+395\u2726 \u00a7e(24,393/25,000)",
+				"\u00a76LEGENDARY CHESTPLATE"));
+
+		assertTrue(result.isPresent());
+		assertEquals(24_393, result.get().kills());
+	}
+
+	@Test
 	void ignoresNonFinalDestinationArmor() {
 		var result = parser.parse(ArmorPiece.BOOTS, "Ancient Necron's Boots", List.of("Kills: 25,437"));
 
