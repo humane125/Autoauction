@@ -72,6 +72,64 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void reconnectsWhenUsernameChanges() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.ensureStartedFor("FirstPlayer", "1.0.0");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		FakeConnection firstConnection = transport.connection;
+
+		client.ensureStartedFor("SecondPlayer", "1.0.0");
+		transport.open();
+
+		assertEquals(2, transport.connectCalls);
+		assertTrue(firstConnection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"offline\"")));
+		assertTrue(firstConnection.closed);
+		assertTrue(transport.connection.sentMessages.getFirst().contains("\"username\":\"SecondPlayer\""));
+
+		client.close();
+	}
+
+	@Test
+	void doesNotStartDuplicateSocketWhileConnectionIsPending() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.ensureStartedFor("SocketPlayer", "1.0.0");
+		client.ensureStartedFor("SocketPlayer", "1.0.0");
+		client.ensureStartedFor("SocketPlayer", "1.0.0");
+
+		assertEquals(1, transport.connectCalls);
+		client.close();
+	}
+
+	@Test
+	void ignoresLateCloseFromPreviousSocketAfterUsernameChanges() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
+			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
+			30_000_000, 8_000, 250, 5_000);
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.ensureStartedFor("FirstPlayer", "1.0.0");
+		transport.open();
+		client.ensureStartedFor("SecondPlayer", "1.0.0");
+		transport.closeConnection(0);
+		client.ensureStartedFor("SecondPlayer", "1.0.0");
+
+		assertEquals(2, transport.connectCalls);
+		client.close();
+	}
+
+	@Test
 	void sendsExplicitStatusUpdatesAfterAuthOk() {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
@@ -194,15 +252,18 @@ class ModSocketClientTest {
 	}
 
 	private static final class FakeTransport implements ModSocketClient.Transport {
-		private final FakeConnection connection = new FakeConnection();
+		private FakeConnection connection = new FakeConnection();
 		private ModSocketClient.Listener listener;
+		private final List<ModSocketClient.Listener> listeners = new ArrayList<>();
 		private URI connectedUri;
 		private int connectCalls;
 
 		@Override
 		public CompletableFuture<ModSocketClient.Connection> connect(URI uri, ModSocketClient.Listener listener) {
+			this.connection = new FakeConnection();
 			this.connectedUri = uri;
 			this.listener = listener;
+			this.listeners.add(listener);
 			this.connectCalls++;
 			return CompletableFuture.completedFuture(connection);
 		}
@@ -217,6 +278,10 @@ class ModSocketClientTest {
 
 		void error(Throwable error) {
 			listener.onError(error);
+		}
+
+		void closeConnection(int index) {
+			listeners.get(index).onClose();
 		}
 	}
 

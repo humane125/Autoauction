@@ -33,6 +33,9 @@ public final class ModSocketClient implements AutoCloseable {
 	private ScheduledFuture<?> heartbeatTask;
 	private boolean authenticated;
 	private String lastReportedStatus;
+	private String connectedUsername;
+	private String connectingUsername;
+	private long connectionGeneration;
 
 	public ModSocketClient(AutoAuctionConfig config) {
 		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), reason -> {});
@@ -64,18 +67,29 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean start(String username, String clientVersion) {
-		if (connection != null || config.apiToken().isBlank() || String.valueOf(username).isBlank()) {
-			log("AutoAuction mod socket not started: connection exists, API token missing, or username missing");
+		if (connection != null || connectingUsername != null) {
+			return false;
+		}
+		if (config.apiToken().isBlank() || String.valueOf(username).isBlank()) {
+			log("AutoAuction mod socket not started: API token missing or username missing");
 			return false;
 		}
 
 		URI uri = socketUri(config.apiBaseUrl());
 		log("AutoAuction mod socket connecting to " + uri);
+		long generation = ++connectionGeneration;
+		connectingUsername = username;
 		transport.connect(uri, new Listener() {
 			@Override
 			public void onOpen(Connection openedConnection) {
 				synchronized (ModSocketClient.this) {
+					if (generation != connectionGeneration) {
+						openedConnection.close();
+						return;
+					}
 					connection = openedConnection;
+					connectedUsername = username;
+					connectingUsername = null;
 				}
 				openedConnection.send(GSON.toJson(new AuthMessage(config.apiToken(), username, clientVersion)));
 				log("AutoAuction mod socket opened; sent auth for " + username + " clientVersion=" + clientVersion);
@@ -90,9 +104,14 @@ public final class ModSocketClient implements AutoCloseable {
 			public void onClose() {
 				stopHeartbeat();
 				synchronized (ModSocketClient.this) {
+					if (generation != connectionGeneration) {
+						return;
+					}
 					connection = null;
 					authenticated = false;
 					lastReportedStatus = null;
+					connectedUsername = null;
+					connectingUsername = null;
 				}
 				log("AutoAuction mod socket closed by remote");
 			}
@@ -101,14 +120,37 @@ public final class ModSocketClient implements AutoCloseable {
 			public void onError(Throwable error) {
 				stopHeartbeat();
 				synchronized (ModSocketClient.this) {
+					if (generation != connectionGeneration) {
+						return;
+					}
 					connection = null;
 					authenticated = false;
 					lastReportedStatus = null;
+					connectedUsername = null;
+					connectingUsername = null;
 				}
 				log("AutoAuction mod socket error: " + error.getMessage());
 			}
 		});
 		return true;
+	}
+
+	public synchronized boolean ensureStartedFor(String username, String clientVersion) {
+		String cleanUsername = String.valueOf(username == null ? "" : username).trim();
+		if (config.apiToken().isBlank() || cleanUsername.isBlank()) {
+			log("AutoAuction mod socket not started: API token missing or username missing");
+			return false;
+		}
+		if (connection != null && Objects.equals(connectedUsername, cleanUsername)) {
+			return false;
+		}
+		if (connection == null && Objects.equals(connectingUsername, cleanUsername)) {
+			return false;
+		}
+		if (connection != null) {
+			closeCurrentConnection();
+		}
+		return start(cleanUsername, clientVersion);
 	}
 
 	private void handleMessage(String text) {
@@ -219,6 +261,12 @@ public final class ModSocketClient implements AutoCloseable {
 
 	@Override
 	public synchronized void close() {
+		closeCurrentConnection();
+		heartbeatExecutor.shutdownNow();
+	}
+
+	private synchronized void closeCurrentConnection() {
+		connectionGeneration++;
 		stopHeartbeat();
 		if (connection != null) {
 			if (authenticated) {
@@ -231,7 +279,8 @@ public final class ModSocketClient implements AutoCloseable {
 			log("AutoAuction mod socket closed");
 			connection = null;
 		}
-		heartbeatExecutor.shutdownNow();
+		connectedUsername = null;
+		connectingUsername = null;
 	}
 
 	private void log(String message) {

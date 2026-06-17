@@ -54,7 +54,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private boolean workflowStarted;
-	private boolean modSocketStarted;
 	private boolean dumpSlotsKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
 	private long lastCookieBuffAlertAt;
@@ -104,13 +103,13 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startModSocketIfNeeded(Minecraft client) {
-		if (modSocketStarted || config.apiToken().isBlank()) {
+		if (config.apiToken().isBlank() || client.getUser() == null) {
 			return;
 		}
 		String clientVersion = FabricLoader.getInstance().getModContainer("autoauction")
 			.map(container -> container.getMetadata().getVersion().getFriendlyString())
 			.orElse("unknown");
-		modSocketStarted = modSocketClient.start(client.getUser().getName(), clientVersion);
+		modSocketClient.ensureStartedFor(client.getUser().getName(), clientVersion);
 	}
 
 	private void reportConnectionStatus(Minecraft client) {
