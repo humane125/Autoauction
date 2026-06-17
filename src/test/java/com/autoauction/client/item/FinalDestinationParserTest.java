@@ -22,6 +22,15 @@ class FinalDestinationParserTest {
 	}
 
 	@Test
+	void parsesFinalDestinationKillsWithLegacyFormattingCodes() {
+		var result = parser.parse(ArmorPiece.LEGGINGS, "\u00a76Ancient Final Destination Leggings",
+			List.of("\u00a77Kills: \u00a7c25,437", "\u00a76LEGENDARY LEGGINGS"));
+
+		assertTrue(result.isPresent());
+		assertEquals(25_437, result.get().kills());
+	}
+
+	@Test
 	void ignoresNonFinalDestinationArmor() {
 		var result = parser.parse(ArmorPiece.BOOTS, "Ancient Necron's Boots", List.of("Kills: 25,437"));
 

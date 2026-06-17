@@ -9,13 +9,16 @@ import java.util.regex.Pattern;
 
 public final class FinalDestinationParser {
 	private static final Pattern KILLS = Pattern.compile("(?i)kills\\s*:\\s*([0-9,]+)");
+	private static final Pattern LEGACY_FORMATTING = Pattern.compile("(?i)\u00a7[0-9a-fk-or]");
 
 	public Optional<ArmorSnapshot> parse(ArmorPiece piece, String displayName, List<String> loreLines) {
-		if (!displayName.contains(piece.baseName())) {
+		String cleanDisplayName = stripFormatting(displayName);
+		List<String> cleanLoreLines = loreLines.stream().map(FinalDestinationParser::stripFormatting).toList();
+		if (!cleanDisplayName.contains(piece.baseName())) {
 			return Optional.empty();
 		}
 
-		int kills = loreLines.stream()
+		int kills = cleanLoreLines.stream()
 			.map(KILLS::matcher)
 			.filter(matcher -> matcher.find())
 			.map(matcher -> matcher.group(1).replace(",", ""))
@@ -23,8 +26,12 @@ public final class FinalDestinationParser {
 			.findFirst()
 			.orElse(0);
 
-		boolean recomb = loreLines.stream().anyMatch(line -> line.toLowerCase().contains("recombobulated"));
-		return Optional.of(new ArmorSnapshot(piece, displayName, piece.baseName(), kills, recomb, countStars(displayName)));
+		boolean recomb = cleanLoreLines.stream().anyMatch(line -> line.toLowerCase().contains("recombobulated"));
+		return Optional.of(new ArmorSnapshot(piece, cleanDisplayName, piece.baseName(), kills, recomb, countStars(cleanDisplayName)));
+	}
+
+	private static String stripFormatting(String value) {
+		return LEGACY_FORMATTING.matcher(String.valueOf(value == null ? "" : value)).replaceAll("");
 	}
 
 	private int countStars(String displayName) {
