@@ -15,6 +15,7 @@ import com.autoauction.client.domain.AuctionItemRequestFactory;
 import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
+import com.autoauction.client.handoff.AltManagerHandoffClient;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import net.fabricmc.api.ClientModInitializer;
@@ -52,6 +53,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private AuctionApiClient apiClient;
 	private ModSocketClient modSocketClient;
 	private DiscordNotifier notifier;
+	private AltManagerHandoffClient handoffClient;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private boolean workflowStarted;
@@ -59,6 +61,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private boolean emergencyStopKeyWasDown;
 	private long lastCookieBuffAlertAt;
 	private RealAuctionWorkflow realWorkflow;
+	private PendingHandoff pendingHandoff;
 
 	@Override
 	public void onInitializeClient() {
@@ -69,6 +72,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.apiClient = new AuctionApiClient(config);
 			this.modSocketClient = new ModSocketClient(config, this::disconnectFromRemoteCommand);
 			this.notifier = new DiscordNotifier(config);
+			this.handoffClient = new AltManagerHandoffClient();
 			registerCommands();
 			registerMessageHandlers();
 			registerConnectionStatusHandlers();
@@ -80,6 +84,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
 				startModSocketIfNeeded(client);
 				reportConnectionStatus(client);
+				handlePendingHandoff(client);
 				if (client.player == null || controller == null || actions == null) {
 					return;
 				}
@@ -187,6 +192,56 @@ public class AutoauctionClient implements ClientModInitializer {
 				actions.disconnect(client, disconnectReason);
 			}
 		});
+	}
+
+	private void handlePendingHandoff(Minecraft client) {
+		if (pendingHandoff == null || controller == null || actions == null) {
+			return;
+		}
+
+		long elapsed = System.currentTimeMillis() - pendingHandoff.startedAt;
+		String currentUsername = client.getUser() == null ? "" : client.getUser().getName();
+		boolean switched = !currentUsername.isBlank()
+			&& !currentUsername.equalsIgnoreCase(pendingHandoff.previousUsername)
+			&& (pendingHandoff.targetUsername.isBlank() || currentUsername.equalsIgnoreCase(pendingHandoff.targetUsername));
+
+		if (!switched) {
+			if (elapsed > 60_000) {
+				notifyIssueAsync("account handoff timed out waiting for " + pendingHandoff.targetUsername);
+				Autoauction.LOGGER.warn("AutoAuction account handoff timed out waiting for {}", pendingHandoff.targetUsername);
+				pendingHandoff = null;
+				workflowStarted = false;
+				controller.start();
+			}
+			return;
+		}
+
+		if (!pendingHandoff.reconnectStarted) {
+			if (client.player != null || elapsed < 1_500) {
+				return;
+			}
+			pendingHandoff.reconnectStarted = true;
+			pendingHandoff.reconnectStartedAt = System.currentTimeMillis();
+			Autoauction.LOGGER.info("AutoAuction handoff switched to {}; reconnecting to Hypixel.", currentUsername);
+			actions.connectToServer(client, "mc.hypixel.net");
+			return;
+		}
+
+		if (client.player == null || client.getCurrentServer() == null
+			|| !ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+			return;
+		}
+
+		if (!config.macroStartCommand().isBlank()) {
+			Autoauction.LOGGER.info("AutoAuction handoff starting macro with command: {}", config.macroStartCommand());
+			actions.sendChatCommand(client, config.macroStartCommand());
+		} else {
+			Autoauction.LOGGER.info("AutoAuction handoff complete; macroStartCommand is not configured.");
+		}
+		controller.start();
+		workflowStarted = false;
+		notifyInfoAsync("account handoff complete for " + currentUsername + ".");
+		pendingHandoff = null;
 	}
 
 	private String screenText(Screen screen) {
@@ -412,6 +467,26 @@ public class AutoauctionClient implements ClientModInitializer {
 		realWorkflow.start(client);
 	}
 
+	private void beginAccountHandoff(Minecraft client) {
+		String previousUsername = client.getUser() == null ? "" : client.getUser().getName();
+		AltManagerHandoffClient.HandoffResult result = handoffClient.switchToNextAccount();
+		if (!result.switched()) {
+			notifyIssueAsync(result.message());
+			Autoauction.LOGGER.warn("AutoAuction account handoff skipped: {}", result.message());
+			workflowStarted = false;
+			controller.start();
+			return;
+		}
+
+		pendingHandoff = new PendingHandoff(previousUsername, result.targetUsername(), result.targetUuid());
+		Autoauction.LOGGER.info(
+			"AutoAuction account handoff requested: {} -> {} ({})",
+			previousUsername,
+			result.targetUsername(),
+			result.targetUuid()
+		);
+	}
+
 	private void startTestListingWorkflow(Minecraft client, EnumMap<ArmorPiece, String> equippedNames) {
 		EnumMap<ArmorPiece, ArmorSnapshot> fakeArmor = TestArmorSnapshots.finalDestinationSet(config.killThreshold());
 		CompletableFuture<List<PricedArmor>> prices = priceArmorForRealAsync(fakeArmor, equippedNames);
@@ -479,6 +554,21 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private record PricedArmor(ArmorSnapshot armor, String inventoryItemName, int price) {
+	}
+
+	private static final class PendingHandoff {
+		private final String previousUsername;
+		private final String targetUsername;
+		private final String targetUuid;
+		private final long startedAt = System.currentTimeMillis();
+		private boolean reconnectStarted;
+		private long reconnectStartedAt;
+
+		private PendingHandoff(String previousUsername, String targetUsername, String targetUuid) {
+			this.previousUsername = previousUsername;
+			this.targetUsername = targetUsername;
+			this.targetUuid = targetUuid;
+		}
 	}
 
 	private enum RealAuctionState {
@@ -799,10 +889,11 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_DISCONNECT -> {
 					debug(client, "Disconnecting after listing workflow.");
+					beginAccountHandoff(client);
 					actions.disconnect(client, "AutoAuction finished listing.");
 					transition(RealAuctionState.DONE, client);
 					realWorkflow = null;
-					notifyInfoAsync("real auction workflow finished and disconnected.");
+					notifyInfoAsync("real auction workflow finished; account handoff requested.");
 				}
 				case DONE, ERROR -> {
 				}

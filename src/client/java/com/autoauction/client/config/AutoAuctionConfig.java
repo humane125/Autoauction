@@ -6,6 +6,7 @@ public record AutoAuctionConfig(
 	String discordWebhookUrl,
 	String discordMentionUserId,
 	String macroStopCommand,
+	String macroStartCommand,
 	String returnToHubCommand,
 	boolean enabledByDefault,
 	int killThreshold,
@@ -13,9 +14,20 @@ public record AutoAuctionConfig(
 	int clickDelayMs,
 	int disconnectDelayMs
 ) {
+	public AutoAuctionConfig {
+		apiBaseUrl = valueOrEmpty(apiBaseUrl);
+		apiToken = valueOrEmpty(apiToken);
+		discordWebhookUrl = valueOrEmpty(discordWebhookUrl);
+		discordMentionUserId = valueOrEmpty(discordMentionUserId);
+		macroStopCommand = valueOrEmpty(macroStopCommand);
+		macroStartCommand = valueOrEmpty(macroStartCommand);
+		returnToHubCommand = valueOrEmpty(returnToHubCommand);
+	}
+
 	public static AutoAuctionConfig defaults() {
 		return new AutoAuctionConfig(
 			"https://lazy-similarly-reaffirm.ngrok-free.dev",
+			"",
 			"",
 			"",
 			"",
@@ -34,12 +46,16 @@ public record AutoAuctionConfig(
 	}
 
 	public AutoAuctionConfig withMacroStopCommand(String value) {
-		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, value,
+		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, value, macroStartCommand,
 			returnToHubCommand, enabledByDefault, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
 	}
 
 	public AutoAuctionConfig withEnabledByDefault(boolean value) {
 		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, macroStopCommand,
-			returnToHubCommand, value, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
+			macroStartCommand, returnToHubCommand, value, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
+	}
+
+	private static String valueOrEmpty(String value) {
+		return value == null ? "" : value;
 	}
 }

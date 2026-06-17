@@ -24,7 +24,7 @@ class AuctionApiClientTest {
 
 		try {
 			String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-			AutoAuctionConfig config = new AutoAuctionConfig(baseUrl, "", "", "", "/stopmacro", "/hub", true,
+			AutoAuctionConfig config = new AutoAuctionConfig(baseUrl, "", "", "", "/stopmacro", "", "/hub", true,
 				25_000, 8_000, 250, 5_000);
 			AuctionApiClient client = new AuctionApiClient(config);
 

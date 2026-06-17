@@ -4,9 +4,13 @@ import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.item.FinalDestinationParser;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractSignEditScreen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -185,6 +189,12 @@ public final class MinecraftGameActions {
 		if (client.getConnection() != null) {
 			client.disconnectFromWorld(Component.literal(reason));
 		}
+	}
+
+	public void connectToServer(Minecraft client, String address) {
+		ServerData server = new ServerData("Hypixel", address, ServerData.Type.OTHER);
+		Screen parent = client.screen == null ? new TitleScreen() : client.screen;
+		ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(address), server, false, null);
 	}
 
 	public List<String> describeOpenContainerSlots(Minecraft client) {
