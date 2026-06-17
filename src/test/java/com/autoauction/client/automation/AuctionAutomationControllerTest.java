@@ -30,14 +30,9 @@ class AuctionAutomationControllerTest {
 	}
 
 	@Test
-	void startsDisabledByDefaultAndIgnoresArmorUntilStarted() {
+	void startsEnabledByDefaultAndObservesArmorImmediately() {
 		AuctionAutomationController controller = new AuctionAutomationController(AutoAuctionConfig.defaults());
 
-		controller.observeArmor(fullSet(25_000));
-
-		assertEquals(AutomationState.STOPPED, controller.state());
-
-		controller.start();
 		controller.observeArmor(fullSet(25_000));
 
 		assertEquals(AutomationState.THRESHOLD_REACHED, controller.state());

@@ -5,7 +5,6 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,8 +25,7 @@ class DiscordNotifierTest {
 		try {
 			String webhook = "http://127.0.0.1:" + server.getAddress().getPort() + "/webhook";
 			AutoAuctionConfig config = new AutoAuctionConfig("https://lazy-similarly-reaffirm.ngrok-free.dev", "",
-				webhook, "123456789012345678", "/stopmacro", "/hub", false, true, true, List.of("localhost"),
-				25_000, 1_000_000, 30_000_000, 8_000, 250, 5_000);
+				webhook, "123456789012345678", "/stopmacro", "/hub", true, 25_000, 8_000, 250, 5_000);
 
 			new DiscordNotifier(config).issue("failed to open Auction House");
 
@@ -52,8 +50,7 @@ class DiscordNotifierTest {
 		try {
 			String webhook = "http://127.0.0.1:" + server.getAddress().getPort() + "/webhook";
 			AutoAuctionConfig config = new AutoAuctionConfig("https://lazy-similarly-reaffirm.ngrok-free.dev", "",
-				webhook, "123132", "/stopmacro", "/hub", false, true, true, List.of("localhost"),
-				25_000, 1_000_000, 30_000_000, 8_000, 250, 5_000);
+				webhook, "123132", "/stopmacro", "/hub", true, 25_000, 8_000, 250, 5_000);
 
 			new DiscordNotifier(config).ban("RobinRz", "Cheating");
 

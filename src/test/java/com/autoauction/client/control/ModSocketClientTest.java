@@ -18,9 +18,7 @@ class ModSocketClientTest {
 	@Test
 	void connectsToModWebSocketAndSendsAuthPayload() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("https://lazy-similarly-reaffirm.ngrok-free.dev/", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("https://lazy-similarly-reaffirm.ngrok-free.dev/", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 1);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -38,9 +36,7 @@ class ModSocketClientTest {
 	@Test
 	void sendsActiveAfterAuthOkThenHeartbeats() throws Exception {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 1);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -57,9 +53,7 @@ class ModSocketClientTest {
 	@Test
 	void sendsOfflineBeforeClosingAuthenticatedConnection() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -74,9 +68,7 @@ class ModSocketClientTest {
 	@Test
 	void reconnectsWhenUsernameChanges() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.ensureStartedFor("FirstPlayer", "1.0.0");
@@ -98,9 +90,7 @@ class ModSocketClientTest {
 	@Test
 	void doesNotStartDuplicateSocketWhileConnectionIsPending() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.ensureStartedFor("SocketPlayer", "1.0.0");
@@ -114,9 +104,7 @@ class ModSocketClientTest {
 	@Test
 	void ignoresLateCloseFromPreviousSocketAfterUsernameChanges() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.ensureStartedFor("FirstPlayer", "1.0.0");
@@ -132,9 +120,7 @@ class ModSocketClientTest {
 	@Test
 	void sendsExplicitStatusUpdatesAfterAuthOk() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -151,9 +137,7 @@ class ModSocketClientTest {
 	@Test
 	void sendsBanMetadataWithBannedStatus() {
 		FakeTransport transport = new FakeTransport();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -182,9 +166,7 @@ class ModSocketClientTest {
 	void invokesDisconnectHandlerWhenServerSendsDisconnectNow() {
 		FakeTransport transport = new FakeTransport();
 		List<String> disconnectReasons = new ArrayList<>();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000, message -> {}, disconnectReasons::add);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -200,9 +182,7 @@ class ModSocketClientTest {
 	void logsWebSocketLifecycleWithoutLeakingApiKey() throws Exception {
 		FakeTransport transport = new FakeTransport();
 		List<String> logs = new ArrayList<>();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_secret_mod_key",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_secret_mod_key");
 		ModSocketClient client = new ModSocketClient(config, transport, 1, logs::add);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -227,9 +207,7 @@ class ModSocketClientTest {
 	void logsWebSocketErrors() {
 		FakeTransport transport = new FakeTransport();
 		List<String> logs = new ArrayList<>();
-		AutoAuctionConfig config = new AutoAuctionConfig("http://127.0.0.1:3000", "hpx_test_mod",
-			"", "", "/stopmacro", "/hub", false, true, true, List.of("localhost"), 25_000, 1_000_000,
-			30_000_000, 8_000, 250, 5_000);
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
 		ModSocketClient client = new ModSocketClient(config, transport, 30_000, logs::add);
 
 		client.start("SocketPlayer", "26.1.1");
@@ -249,6 +227,10 @@ class ModSocketClientTest {
 
 		assertEquals(0, transport.connectCalls);
 		client.close();
+	}
+
+	private AutoAuctionConfig config(String baseUrl, String apiKey) {
+		return new AutoAuctionConfig(baseUrl, apiKey, "", "", "/stopmacro", "/hub", true, 25_000, 8_000, 250, 5_000);
 	}
 
 	private static final class FakeTransport implements ModSocketClient.Transport {

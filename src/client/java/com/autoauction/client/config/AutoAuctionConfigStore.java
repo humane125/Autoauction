@@ -25,7 +25,9 @@ public final class AutoAuctionConfigStore {
 
 		String json = Files.readString(configFile);
 		AutoAuctionConfig config = GSON.fromJson(json, AutoAuctionConfig.class);
-		return config == null ? AutoAuctionConfig.defaults() : config;
+		AutoAuctionConfig resolved = config == null ? AutoAuctionConfig.defaults() : config;
+		save(resolved);
+		return resolved;
 	}
 
 	public void save(AutoAuctionConfig config) throws IOException {

@@ -330,29 +330,16 @@ public class AutoauctionClient implements ClientModInitializer {
 				return 1;
 			}))
 			.then(literal("testtrigger").executes(context -> {
-				if (!config.dryRun()) {
-					sendFeedback(context.getSource(), "AutoAuction testtrigger is blocked unless dryRun is true.");
-					return 0;
-				}
-
 				workflowStarted = true;
 				priceArmorAsync(TestArmorSnapshots.finalDestinationSet(config.killThreshold()),
 					"Test trigger ran; priced fake 25k Final Destination set without clicking.");
-				sendFeedback(context.getSource(), "AutoAuction testtrigger started API/Discord dry-run pricing.");
+				sendFeedback(context.getSource(), "AutoAuction testtrigger started API/Discord pricing.");
 				return 1;
 			}))
 			.then(literal("testlisting").executes(context -> {
 				Minecraft client = context.getSource().getClient();
-				if (!config.dryRun()) {
-					sendFeedback(context.getSource(), "AutoAuction testlisting is blocked unless dryRun is true.");
-					return 0;
-				}
 				if (realWorkflow != null) {
 					sendFeedback(context.getSource(), "AutoAuction workflow is already running. Press F9 to cancel it.");
-					return 0;
-				}
-				if (!isAllowedServer(client)) {
-					sendFeedback(context.getSource(), "AutoAuction testlisting blocked: current server is not in allowedServers.");
 					return 0;
 				}
 
@@ -391,7 +378,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private String statusMessage() {
 		return "AutoAuction status: state=" + controller.state()
 			+ ", enabled=" + controller.isEnabled()
-			+ ", dryRun=" + config.dryRun()
 			+ ", threshold=" + config.killThreshold()
 			+ ", apiBaseUrl=" + config.apiBaseUrl();
 	}
@@ -412,18 +398,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor) {
-		if (config.dryRun()) {
-			priceArmorAsync(armor, "Dry run threshold reached; priced armor without clicking.");
-			return;
-		}
-
 		if (!config.canRunRealListing()) {
-			notifyIssueAsync("macroStopCommand is not configured while dryRun is false");
-			return;
-		}
-
-		if (!isAllowedServer(client)) {
-			notifyIssueAsync("current server is not in allowedServers");
+			notifyIssueAsync("macroStopCommand is not configured");
 			return;
 		}
 
@@ -443,28 +419,12 @@ public class AutoauctionClient implements ClientModInitializer {
 		realWorkflow.start(client);
 	}
 
-	private boolean isAllowedServer(Minecraft client) {
-		if (!config.privateServerOnly()) {
-			return true;
-		}
-		if (client.getCurrentServer() == null) {
-			return false;
-		}
-
-		String currentAddress = client.getCurrentServer().ip.toLowerCase();
-		return config.allowedServers().stream().map(String::toLowerCase).anyMatch(currentAddress::contains);
-	}
-
 	private void priceArmorAsync(EnumMap<ArmorPiece, ArmorSnapshot> armor, String completionMessage) {
 		CompletableFuture.runAsync(() -> {
 			try {
 				for (ArmorSnapshot snapshot : armor.values()) {
 					var response = apiClient.recommend(requestFactory.fromArmor(snapshot, config.killThreshold()));
 					int price = response.recommendedPrice();
-					if (price < config.minBinPrice() || price > config.maxBinPrice()) {
-						notifier.issue(snapshot.baseName() + " recommended price " + price + " is outside configured bounds.");
-						continue;
-					}
 					Autoauction.LOGGER.info("AutoAuction priced {} at {}", snapshot.baseName(), price);
 				}
 				notifier.info(completionMessage);
@@ -498,9 +458,6 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					var response = apiClient.recommend(requestFactory.fromArmor(snapshot, config.killThreshold()));
 					int price = response.recommendedPrice();
-					if (price < config.minBinPrice() || price > config.maxBinPrice()) {
-						throw new IllegalStateException(snapshot.baseName() + " recommended price " + price + " is outside configured bounds.");
-					}
 					Autoauction.LOGGER.info("AutoAuction priced {} at {}", snapshot.baseName(), price);
 					priced.add(new PricedArmor(snapshot, inventoryName, price));
 				}
