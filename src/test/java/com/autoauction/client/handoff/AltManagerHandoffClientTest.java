@@ -13,6 +13,7 @@ class AltManagerHandoffClientTest {
 	void resetFakeSwitcher() {
 		FakeAccountSwitcher.switchTarget = "";
 		FakeAccountSwitcher.switchCalls = 0;
+		FakeAccountSwitcher.proxyReady = false;
 	}
 
 	@Test
@@ -28,9 +29,23 @@ class AltManagerHandoffClientTest {
 		assertEquals(1, FakeAccountSwitcher.switchCalls);
 	}
 
+	@Test
+	void checksWhetherAltManagerProxyIsReadyForTargetAccount() {
+		AltManagerHandoffClient client = new AltManagerHandoffClient(FakeAccountSwitcher.class.getName());
+
+		assertEquals(AltManagerHandoffClient.ProxyReadiness.WAITING,
+			client.proxyReadiness("NextPlayer", "next-uuid"));
+
+		FakeAccountSwitcher.proxyReady = true;
+
+		assertEquals(AltManagerHandoffClient.ProxyReadiness.READY,
+			client.proxyReadiness("NextPlayer", "next-uuid"));
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
+		private static boolean proxyReady;
 
 		public static Optional<AccountSummary> nextAccount() {
 			return Optional.of(new AccountSummary("NextPlayer", "next-uuid", "MICROSOFT"));
@@ -40,6 +55,12 @@ class AltManagerHandoffClientTest {
 			switchTarget = uuidOrName;
 			switchCalls++;
 			return true;
+		}
+
+		public static boolean isProxyReady(String username, String uuid) {
+			return proxyReady
+				&& "NextPlayer".equals(username)
+				&& "next-uuid".equals(uuid);
 		}
 	}
 

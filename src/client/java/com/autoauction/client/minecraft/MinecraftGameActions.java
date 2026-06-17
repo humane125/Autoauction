@@ -3,6 +3,7 @@ package com.autoauction.client.minecraft;
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.item.FinalDestinationParser;
+import net.fabricmc.fabric.impl.command.client.ClientCommandInternals;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -22,7 +23,9 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 public final class MinecraftGameActions {
 	private static final int PLAYER_HELMET_SLOT = 5;
@@ -51,11 +54,28 @@ public final class MinecraftGameActions {
 	}
 
 	public void sendChatCommand(Minecraft client, String command) {
-		if (client.player == null || command.isBlank()) {
+		String normalized = normalizedCommand(command);
+		if (client.player == null || normalized.isBlank()) {
 			return;
 		}
 
-		client.player.connection.sendCommand(command.startsWith("/") ? command.substring(1) : command);
+		client.player.connection.sendCommand(normalized);
+	}
+
+	public boolean sendClientCommand(Minecraft client, String command) {
+		String normalized = normalizedCommand(command);
+		if (normalized.isBlank() || client.getConnection() == null) {
+			return false;
+		}
+		return ClientCommandInternals.executeCommand(normalized);
+	}
+
+	static String normalizedCommand(String command) {
+		String normalized = String.valueOf(command == null ? "" : command).trim();
+		while (normalized.startsWith("/")) {
+			normalized = normalized.substring(1);
+		}
+		return normalized;
 	}
 
 	public boolean hasEmptyInventorySlots(Minecraft client, int requiredSlots) {
@@ -140,6 +160,26 @@ public final class MinecraftGameActions {
 		return client.screen != null && client.screen.getTitle().getString().contains(text);
 	}
 
+	public boolean isBazaarOpen(Minecraft client) {
+		return screenTitleMatches(client, MinecraftGameActions::isBazaarTitle);
+	}
+
+	public boolean isSellInventoryConfirmOpen(Minecraft client) {
+		return screenTitleMatches(client, MinecraftGameActions::isSellInventoryConfirmTitle);
+	}
+
+	public Optional<Integer> findSellInventoryButtonSlot(Minecraft client) {
+		return findHandlerSlotByItemNameMatching(client, MinecraftGameActions::isSellInventoryButtonName);
+	}
+
+	public Optional<Integer> findSellInventoryConfirmSlot(Minecraft client) {
+		return findHandlerSlotByItemNameMatching(client, MinecraftGameActions::isSellInventoryConfirmName);
+	}
+
+	private boolean screenTitleMatches(Minecraft client, Predicate<String> matcher) {
+		return client.screen != null && matcher.test(client.screen.getTitle().getString());
+	}
+
 	public Optional<String> itemNameAt(Minecraft client, int handlerSlot) {
 		if (client.player == null || handlerSlot < 0 || handlerSlot >= client.player.containerMenu.slots.size()) {
 			return Optional.empty();
@@ -153,17 +193,43 @@ public final class MinecraftGameActions {
 	}
 
 	public Optional<Integer> findHandlerSlotByItemName(Minecraft client, String itemNamePart) {
+		return findHandlerSlotByItemNameMatching(client, itemName -> itemName.contains(itemNamePart));
+	}
+
+	private Optional<Integer> findHandlerSlotByItemNameMatching(Minecraft client, Predicate<String> matcher) {
 		if (client.player == null) {
 			return Optional.empty();
 		}
 
 		for (int handlerSlot = 0; handlerSlot < client.player.containerMenu.slots.size(); handlerSlot++) {
 			ItemStack stack = client.player.containerMenu.slots.get(handlerSlot).getItem();
-			if (!stack.isEmpty() && stack.getHoverName().getString().contains(itemNamePart)) {
+			if (!stack.isEmpty() && matcher.test(stack.getHoverName().getString())) {
 				return Optional.of(handlerSlot);
 			}
 		}
 		return Optional.empty();
+	}
+
+	static boolean isBazaarTitle(String title) {
+		return containsIgnoreCase(title, "Bazaar");
+	}
+
+	static boolean isSellInventoryButtonName(String itemName) {
+		return containsIgnoreCase(itemName, "Sell Inventory");
+	}
+
+	static boolean isSellInventoryConfirmTitle(String title) {
+		return containsIgnoreCase(title, "Are you sure?");
+	}
+
+	static boolean isSellInventoryConfirmName(String itemName) {
+		return containsIgnoreCase(itemName, "Selling whole inventory");
+	}
+
+	private static boolean containsIgnoreCase(String value, String expectedPart) {
+		return String.valueOf(value == null ? "" : value)
+			.toLowerCase(Locale.ROOT)
+			.contains(String.valueOf(expectedPart == null ? "" : expectedPart).toLowerCase(Locale.ROOT));
 	}
 
 	public boolean submitSignText(Minecraft client, String text) {

@@ -20,7 +20,8 @@ class AuctionItemRequestFactoryTest {
 
 		assertEquals("Final Destination Chestplate", request.baseName());
 		assertEquals(25_000, request.attributes().get("minKills"));
-		assertEquals(25_321, request.attributes().get("maxKills"));
+		assertEquals(30_000, request.attributes().get("maxKills"));
+		assertEquals(27_500, request.attributes().get("kills"));
 		assertEquals(false, request.attributes().get("recomb"));
 		assertEquals(0, request.attributes().get("minStars"));
 	}

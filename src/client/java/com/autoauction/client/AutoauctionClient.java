@@ -47,6 +47,12 @@ import java.util.concurrent.CompletableFuture;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
 public class AutoauctionClient implements ClientModInitializer {
+	private static final int TEST_LISTING_PRICE = 2_500_000;
+	private static final int MIN_CLICK_DELAY_MS = 400;
+	private static final long PROXY_READY_RECONNECT_DELAY_MS = 1_500L;
+	private static final long HYPIXEL_READY_MACRO_DELAY_MS = 500L;
+	private static final int ISLAND_COMMAND_COOLDOWN_DELAY_MS = 5_500;
+
 	private AutoAuctionConfig config;
 	private AuctionAutomationController controller;
 	private MinecraftGameActions actions;
@@ -217,7 +223,23 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		if (!pendingHandoff.reconnectStarted) {
-			if (client.player != null || elapsed < 1_500) {
+			if (handoffClient.proxyReadiness(pendingHandoff.targetUsername, pendingHandoff.targetUuid)
+				!= AltManagerHandoffClient.ProxyReadiness.READY) {
+				if (elapsed > 60_000) {
+					notifyIssueAsync("account handoff timed out waiting for proxy for " + pendingHandoff.targetUsername);
+					Autoauction.LOGGER.warn("AutoAuction account handoff timed out waiting for proxy for {}", pendingHandoff.targetUsername);
+					pendingHandoff = null;
+					workflowStarted = false;
+					controller.start();
+				}
+				return;
+			}
+			if (pendingHandoff.proxyReadyAt == 0L) {
+				pendingHandoff.proxyReadyAt = System.currentTimeMillis();
+				Autoauction.LOGGER.info("AutoAuction handoff proxy ready for {}; waiting before reconnect.", currentUsername);
+				return;
+			}
+			if (client.player != null || !proxyReadyDelayElapsed(pendingHandoff.proxyReadyAt, System.currentTimeMillis())) {
 				return;
 			}
 			pendingHandoff.reconnectStarted = true;
@@ -229,12 +251,22 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		if (client.player == null || client.getCurrentServer() == null
 			|| !ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+			pendingHandoff.hypixelReadyAt = 0L;
+			return;
+		}
+
+		if (pendingHandoff.hypixelReadyAt == 0L) {
+			pendingHandoff.hypixelReadyAt = System.currentTimeMillis();
+			Autoauction.LOGGER.info("AutoAuction handoff loaded into Hypixel as {}; waiting before macro start.", currentUsername);
+			return;
+		}
+		if (!hypixelReadyDelayElapsed(pendingHandoff.hypixelReadyAt, System.currentTimeMillis())) {
 			return;
 		}
 
 		if (!config.macroStartCommand().isBlank()) {
 			Autoauction.LOGGER.info("AutoAuction handoff starting macro with command: {}", config.macroStartCommand());
-			actions.sendChatCommand(client, config.macroStartCommand());
+			actions.sendClientCommand(client, config.macroStartCommand());
 		} else {
 			Autoauction.LOGGER.info("AutoAuction handoff complete; macroStartCommand is not configured.");
 		}
@@ -489,9 +521,25 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void startTestListingWorkflow(Minecraft client, EnumMap<ArmorPiece, String> equippedNames) {
 		EnumMap<ArmorPiece, ArmorSnapshot> fakeArmor = TestArmorSnapshots.finalDestinationSet(config.killThreshold());
-		CompletableFuture<List<PricedArmor>> prices = priceArmorForRealAsync(fakeArmor, equippedNames);
+		CompletableFuture<List<PricedArmor>> prices = testListingPrices(fakeArmor, equippedNames);
 		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(fakeArmor.values()), prices);
 		realWorkflow.start(client);
+	}
+
+	static CompletableFuture<List<PricedArmor>> testListingPrices(
+		EnumMap<ArmorPiece, ArmorSnapshot> armor,
+		EnumMap<ArmorPiece, String> inventoryNames
+	) {
+		List<PricedArmor> priced = new ArrayList<>();
+		for (ArmorPiece piece : ArmorPiece.values()) {
+			ArmorSnapshot snapshot = armor.get(piece);
+			String inventoryName = inventoryNames.get(piece);
+			if (snapshot == null || inventoryName == null || inventoryName.isBlank()) {
+				throw new IllegalStateException("missing armor test data for " + piece);
+			}
+			priced.add(new PricedArmor(snapshot, inventoryName, TEST_LISTING_PRICE));
+		}
+		return CompletableFuture.completedFuture(priced);
 	}
 
 	private void priceArmorAsync(EnumMap<ArmorPiece, ArmorSnapshot> armor, String completionMessage) {
@@ -553,7 +601,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		});
 	}
 
-	private record PricedArmor(ArmorSnapshot armor, String inventoryItemName, int price) {
+	record PricedArmor(ArmorSnapshot armor, String inventoryItemName, int price) {
 	}
 
 	private static final class PendingHandoff {
@@ -561,8 +609,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		private final String targetUsername;
 		private final String targetUuid;
 		private final long startedAt = System.currentTimeMillis();
+		private long proxyReadyAt;
 		private boolean reconnectStarted;
 		private long reconnectStartedAt;
+		private long hypixelReadyAt;
 
 		private PendingHandoff(String previousUsername, String targetUsername, String targetUuid) {
 			this.previousUsername = previousUsername;
@@ -573,6 +623,15 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum RealAuctionState {
 		STOP_MACRO,
+		RETURN_TO_ISLAND_BEFORE_ARMOR,
+		WAIT_ISLAND_BEFORE_ARMOR,
+		CHECK_INVENTORY_SPACE,
+		OPEN_BAZAAR_TO_FREE_SPACE,
+		WAIT_BAZAAR_TO_FREE_SPACE,
+		CLICK_SELL_INVENTORY,
+		WAIT_SELL_INVENTORY_CONFIRM,
+		CONFIRM_SELL_INVENTORY,
+		WAIT_AFTER_SELL_INVENTORY,
 		OPEN_INVENTORY,
 		WAIT_INVENTORY,
 		REMOVE_ARMOR,
@@ -652,8 +711,66 @@ public class AutoauctionClient implements ClientModInitializer {
 			switch (state) {
 				case STOP_MACRO -> {
 					debug(client, "Stopping macro with command: " + config.macroStopCommand());
-					actions.sendChatCommand(client, config.macroStopCommand());
-					transition(RealAuctionState.OPEN_INVENTORY, client);
+					actions.sendClientCommand(client, config.macroStopCommand());
+					transition(RealAuctionState.RETURN_TO_ISLAND_BEFORE_ARMOR, client);
+				}
+				case RETURN_TO_ISLAND_BEFORE_ARMOR -> {
+					debug(client, "Returning to island before removing armor.");
+					actions.sendChatCommand(client, "/is");
+					transition(RealAuctionState.WAIT_ISLAND_BEFORE_ARMOR, client, islandCommandCooldownDelayMs());
+				}
+				case WAIT_ISLAND_BEFORE_ARMOR -> {
+					transitionNow(RealAuctionState.CHECK_INVENTORY_SPACE, client);
+				}
+				case CHECK_INVENTORY_SPACE -> {
+					if (actions.hasEmptyInventorySlots(client, armor.size())) {
+						debug(client, "Inventory has enough space for armor removal.");
+						transition(RealAuctionState.OPEN_INVENTORY, client);
+						return;
+					}
+
+					debug(client, "Inventory is full before armor removal. Opening Bazaar to sell inventory.");
+					transition(RealAuctionState.OPEN_BAZAAR_TO_FREE_SPACE, client);
+				}
+				case OPEN_BAZAAR_TO_FREE_SPACE -> {
+					actions.sendChatCommand(client, "/bz");
+					transition(RealAuctionState.WAIT_BAZAAR_TO_FREE_SPACE, client);
+				}
+				case WAIT_BAZAAR_TO_FREE_SPACE -> {
+					if (!actions.isBazaarOpen(client)) {
+						timeout(client, config.screenTimeoutMs(), "Bazaar screen did not open before inventory sell");
+						return;
+					}
+					transition(RealAuctionState.CLICK_SELL_INVENTORY, client);
+				}
+				case CLICK_SELL_INVENTORY -> {
+					int slot = actions.findSellInventoryButtonSlot(client)
+						.orElseThrow(() -> new IllegalStateException("could not find Bazaar Sell Inventory Now button"));
+					debug(client, "Clicking Bazaar Sell Inventory Now from slot " + slot + ".");
+					actions.clickSlot(client, slot);
+					transition(RealAuctionState.WAIT_SELL_INVENTORY_CONFIRM, client);
+				}
+				case WAIT_SELL_INVENTORY_CONFIRM -> {
+					if (!actions.isSellInventoryConfirmOpen(client)) {
+						timeout(client, config.screenTimeoutMs(), "Bazaar sell inventory confirmation did not open");
+						return;
+					}
+					transition(RealAuctionState.CONFIRM_SELL_INVENTORY, client);
+				}
+				case CONFIRM_SELL_INVENTORY -> {
+					int slot = actions.findSellInventoryConfirmSlot(client)
+						.orElseThrow(() -> new IllegalStateException("could not find Bazaar sell inventory confirm button"));
+					debug(client, "Confirming Bazaar inventory sell from slot " + slot + ".");
+					actions.clickSlot(client, slot);
+					transition(RealAuctionState.WAIT_AFTER_SELL_INVENTORY, client, 1_500);
+				}
+				case WAIT_AFTER_SELL_INVENTORY -> {
+					if (actions.hasEmptyInventorySlots(client, armor.size())) {
+						debug(client, "Bazaar inventory sell finished; inventory has room for armor.");
+						transition(RealAuctionState.OPEN_INVENTORY, client);
+						return;
+					}
+					timeout(client, config.screenTimeoutMs(), "not enough empty inventory slots after Bazaar inventory sell");
 				}
 				case OPEN_INVENTORY -> {
 					debug(client, "Opening inventory to remove armor.");
@@ -669,7 +786,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case REMOVE_ARMOR -> {
 					if (!actions.hasEmptyInventorySlots(client, armor.size())) {
-						fail(client, "not enough empty inventory slots to remove armor");
+						fail(client, "not enough empty inventory slots to remove armor after pre-check");
 						return;
 					}
 					if (armorRemoveIndex >= ArmorPiece.values().length) {
@@ -918,12 +1035,19 @@ public class AutoauctionClient implements ClientModInitializer {
 			Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
 		}
 
+		private void transitionNow(RealAuctionState next, Minecraft client) {
+			state = next;
+			stateStartedAt = System.currentTimeMillis();
+			nextActionAt = stateStartedAt;
+			Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
+		}
+
 		private void delay() {
 			nextActionAt = System.currentTimeMillis() + effectiveClickDelayMs();
 		}
 
 		private int effectiveClickDelayMs() {
-			return Math.max(config.clickDelayMs(), 650);
+			return AutoauctionClient.effectiveClickDelayMs(config.clickDelayMs());
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -968,5 +1092,21 @@ public class AutoauctionClient implements ClientModInitializer {
 				Autoauction.LOGGER.error("AutoAuction Discord ban notification failed", e);
 			}
 		});
+	}
+
+	static int effectiveClickDelayMs(int configuredDelayMs) {
+		return Math.max(configuredDelayMs, MIN_CLICK_DELAY_MS);
+	}
+
+	static boolean proxyReadyDelayElapsed(long proxyReadyAt, long now) {
+		return proxyReadyAt > 0L && now - proxyReadyAt >= PROXY_READY_RECONNECT_DELAY_MS;
+	}
+
+	static boolean hypixelReadyDelayElapsed(long hypixelReadyAt, long now) {
+		return hypixelReadyAt > 0L && now - hypixelReadyAt >= HYPIXEL_READY_MACRO_DELAY_MS;
+	}
+
+	static int islandCommandCooldownDelayMs() {
+		return ISLAND_COMMAND_COOLDOWN_DELAY_MS;
 	}
 }

@@ -47,6 +47,19 @@ public final class AltManagerHandoffClient {
 		}
 	}
 
+	public ProxyReadiness proxyReadiness(String username, String uuid) {
+		try {
+			Class<?> switcherClass = Class.forName(accountSwitcherClassName);
+			Method isProxyReadyMethod = switcherClass.getMethod("isProxyReady", String.class, String.class);
+			Object readyValue = isProxyReadyMethod.invoke(null, username, uuid);
+			return readyValue instanceof Boolean ready && ready ? ProxyReadiness.READY : ProxyReadiness.WAITING;
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return ProxyReadiness.WAITING;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return ProxyReadiness.WAITING;
+		}
+	}
+
 	private static String stringRecordValue(Object value, String methodName) throws ReflectiveOperationException {
 		Object result = value.getClass().getMethod(methodName).invoke(value);
 		return String.valueOf(result == null ? "" : result);
@@ -60,5 +73,10 @@ public final class AltManagerHandoffClient {
 		public static HandoffResult notSwitched(String message) {
 			return new HandoffResult(false, "", "", message);
 		}
+	}
+
+	public enum ProxyReadiness {
+		READY,
+		WAITING
 	}
 }
