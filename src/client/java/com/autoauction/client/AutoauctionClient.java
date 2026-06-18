@@ -1920,6 +1920,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		WAIT_ORDERS,
 		CLICK_FILLED_SELL_OFFER,
 		CLOSE_AFTER_CLAIM,
+		WAIT_PURSE_UPDATE,
 		DONE,
 		ERROR
 	}
@@ -1997,13 +1998,25 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case CLOSE_AFTER_CLAIM -> {
 					actions.closeScreen(client);
-					Optional<TransferPurseTracker.Summary> summary = finishTransferPurseTracking(client);
-					long delta = summary.map(TransferPurseTracker.Summary::delta).orElse(0L);
-					if (!modSocketClient.cycleComplete(quantity, delta)) {
-						fail(client, "could not notify sender that receiver cycle completed");
+					transition(ReceiverClaimSellOfferState.WAIT_PURSE_UPDATE, client);
+				}
+				case WAIT_PURSE_UPDATE -> {
+					Optional<TransferPurseTracker.Summary> preview = transferPurseTracker.preview(currentPurse(client));
+					if (preview.isPresent() && preview.get().delta() >= 0) {
+						Optional<TransferPurseTracker.Summary> summary = finishTransferPurseTracking(client);
+						long delta = summary.map(TransferPurseTracker.Summary::delta).orElse(0L);
+						if (!modSocketClient.cycleComplete(quantity, delta)) {
+							fail(client, "could not notify sender that receiver cycle completed");
+							return;
+						}
+						done(client, "AutoAuction transfer receiver claimed sell offer coins for " + quantity + "x " + itemName + ".");
 						return;
 					}
-					done(client, "AutoAuction transfer receiver claimed sell offer coins for " + quantity + "x " + itemName + ".");
+					if (preview.isPresent()) {
+						debug(client, "Waiting for receiver purse update after sell-offer claim; current delta="
+							+ formatSignedCoins(preview.get().delta()) + ".");
+					}
+					timeout(client, config.screenTimeoutMs(), "receiver purse did not update after claiming sell offer");
 				}
 				case DONE, ERROR -> {
 				}

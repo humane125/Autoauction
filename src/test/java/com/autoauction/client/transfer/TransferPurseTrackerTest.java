@@ -14,6 +14,10 @@ class TransferPurseTrackerTest {
 		TransferPurseTracker tracker = new TransferPurseTracker();
 
 		tracker.start("Receiver", OptionalLong.of(1_000_000L));
+		TransferPurseTracker.Summary preview = tracker.preview(OptionalLong.of(1_875_543L)).orElseThrow();
+		assertEquals("Receiver", preview.role());
+		assertEquals(875_543L, preview.delta());
+
 		TransferPurseTracker.Summary summary = tracker.finish(OptionalLong.of(1_875_543L)).orElseThrow();
 
 		assertEquals("Receiver", summary.role());
@@ -29,6 +33,7 @@ class TransferPurseTrackerTest {
 
 		tracker.start("Sender", OptionalLong.empty());
 
+		assertTrue(tracker.preview(OptionalLong.of(10_000L)).isEmpty());
 		assertTrue(tracker.finish(OptionalLong.of(10_000L)).isEmpty());
 	}
 }

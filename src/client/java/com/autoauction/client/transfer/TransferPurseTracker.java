@@ -17,6 +17,14 @@ public final class TransferPurseTracker {
 	public Optional<Summary> finish(OptionalLong purse) {
 		Snapshot snapshot = active;
 		active = null;
+		return summarize(snapshot, purse);
+	}
+
+	public Optional<Summary> preview(OptionalLong purse) {
+		return summarize(active, purse);
+	}
+
+	private Optional<Summary> summarize(Snapshot snapshot, OptionalLong purse) {
 		if (snapshot == null || purse.isEmpty()) {
 			return Optional.empty();
 		}
