@@ -22,7 +22,12 @@ import com.autoauction.client.handoff.AltManagerHandoffClient;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
+import com.autoauction.client.transfer.BazaarProductId;
+import com.autoauction.client.transfer.BazaarTransferEstimate;
+import com.autoauction.client.transfer.CoinAmountParser;
+import com.autoauction.client.transfer.HypixelBazaarClient;
 import com.autoauction.client.transfer.TransferController;
+import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
@@ -97,6 +102,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
+	private TransferLoopGoal transferLoopGoal;
 	private PendingHandoff pendingHandoff;
 
 	@Override
@@ -480,6 +486,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 			@Override
 			public void onAccepted(ModSocketClient.TransferSession session, String role) {
+				transferLoopGoal = null;
 				sendTransferFeedback(transferController.accepted(toTransferSession(session), transferRole(role)));
 			}
 
@@ -498,6 +505,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				receiverClaimSellOfferWorkflow = null;
 				pendingTransferFill = null;
 				pendingTransferSellFill = null;
+				transferLoopGoal = null;
 				transferPurseTracker.clear();
 			}
 
@@ -546,6 +554,11 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void onCycleComplete(ModSocketClient.TransferCycle cycle) {
+				handleTransferCycleComplete(cycle);
+			}
+
+			@Override
 			public void onError(String code, String message) {
 				sendTransferFeedback(transferController.error(code, message));
 				receiverBuyOrderWorkflow = null;
@@ -555,6 +568,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				receiverClaimSellOfferWorkflow = null;
 				pendingTransferFill = null;
 				pendingTransferSellFill = null;
+				transferLoopGoal = null;
 				transferPurseTracker.clear();
 			}
 		};
@@ -567,6 +581,44 @@ public class AutoauctionClient implements ClientModInitializer {
 			session.receiverUsername(),
 			session.itemName()
 		);
+	}
+
+	private void handleTransferCycleComplete(ModSocketClient.TransferCycle cycle) {
+		TransferLoopGoal goal = transferLoopGoal;
+		String itemName = cycle.session().itemName();
+		sendTransferFeedback("AutoAuction transfer cycle complete for " + cycle.quantity() + "x " + itemName
+			+ ": receiver delta=" + formatSignedCoins(cycle.delta()) + ".");
+		if (goal == null) {
+			return;
+		}
+
+		TransferLoopGoal.Progress progress = goal.recordCycle(cycle.delta());
+		sendTransferFeedback("AutoAuction transfer target progress: cycle " + progress.cycles()
+			+ ", total=" + formatCoins(progress.totalTransferred())
+			+ "/" + formatCoins(progress.targetCoins())
+			+ ", remaining=" + formatCoins(progress.remaining())
+			+ ", estimated cycles left=" + progress.estimatedCyclesRemaining() + ".");
+		if (progress.complete()) {
+			transferLoopGoal = null;
+			sendTransferFeedback("AutoAuction transfer target reached after " + progress.cycles() + " cycles.");
+			return;
+		}
+		if (cycle.delta() <= 0) {
+			transferLoopGoal = null;
+			sendTransferFeedback("AutoAuction transfer loop stopped: receiver delta was not positive, so continuing would not move toward the target.");
+			return;
+		}
+
+		Minecraft.getInstance().execute(() -> {
+			if (!transferController.canRunAsSender()) {
+				transferLoopGoal = null;
+				sendTransferFeedback("AutoAuction transfer loop stopped: this account is no longer the paired sender.");
+				return;
+			}
+			if (!requestTransferRun(Minecraft.getInstance(), itemName, true)) {
+				transferLoopGoal = null;
+			}
+		});
 	}
 
 	private TransferController.Role transferRole(String role) {
@@ -704,25 +756,16 @@ public class AutoauctionClient implements ClientModInitializer {
 						sendFeedback(context.getSource(), "AutoAuction transfer decline sent for " + senderUsername + ".");
 						return 1;
 					})))
-				.then(literal("run").executes(context -> {
-					if (!transferController.canRunAsSender()) {
-						sendFeedback(context.getSource(), "AutoAuction transfer run failed: this account is not a paired sender.");
-						return 0;
-					}
-					String itemName = transferController.session().itemName();
-					int quantity = actions.countInventoryItemsByName(context.getSource().getClient(), itemName);
-					if (quantity <= 0) {
-						sendFeedback(context.getSource(), "AutoAuction transfer run failed: no inventory items matching " + itemName + ".");
-						return 0;
-					}
-					if (!modSocketClient.runTransfer(quantity)) {
-						sendFeedback(context.getSource(), "AutoAuction transfer run failed: mod socket is not connected yet.");
-						return 0;
-					}
-					startTransferPurseTracking("sender", context.getSource().getClient());
-					sendFeedback(context.getSource(), "AutoAuction transfer run requested for " + quantity + "x " + itemName + ".");
-					return 1;
-				}))
+				.then(literal("run")
+					.executes(context -> runTransferCommand(context.getSource(), OptionalLong.empty()))
+					.then(argument("targetCoins", StringArgumentType.word()).executes(context -> {
+						OptionalLong targetCoins = CoinAmountParser.parse(StringArgumentType.getString(context, "targetCoins"));
+						if (targetCoins.isEmpty()) {
+							sendFeedback(context.getSource(), "AutoAuction transfer run failed: target must be a positive coin amount like 200m, 2.5m, or 200000000.");
+							return 0;
+						}
+						return runTransferCommand(context.getSource(), targetCoins);
+					})))
 				.then(literal("cancel").executes(context -> {
 					if (!modSocketClient.cancelTransfer()) {
 						sendFeedback(context.getSource(), "AutoAuction transfer cancel failed: mod socket is not connected yet.");
@@ -747,6 +790,63 @@ public class AutoauctionClient implements ClientModInitializer {
 						return 1;
 					}))))
 		));
+	}
+
+	private int runTransferCommand(FabricClientCommandSource source, OptionalLong targetCoins) {
+		if (!transferController.canRunAsSender()) {
+			sendFeedback(source, "AutoAuction transfer run failed: this account is not a paired sender.");
+			return 0;
+		}
+		String itemName = transferController.session().itemName();
+		if (targetCoins.isPresent()) {
+			transferLoopGoal = new TransferLoopGoal(targetCoins.getAsLong());
+		} else {
+			transferLoopGoal = null;
+		}
+		boolean started = requestTransferRun(source.getClient(), itemName, false);
+		if (!started) {
+			transferLoopGoal = null;
+			return 0;
+		}
+		if (targetCoins.isPresent()) {
+			requestBazaarTransferEstimate(itemName, actions.countInventoryItemsByName(source.getClient(), itemName), targetCoins.getAsLong());
+			sendFeedback(source, "AutoAuction transfer target set to " + formatCoins(targetCoins.getAsLong()) + " coins.");
+		}
+		return 1;
+	}
+
+	private boolean requestTransferRun(Minecraft client, String itemName, boolean loopContinuation) {
+		int quantity = actions.countInventoryItemsByName(client, itemName);
+		if (quantity <= 0) {
+			sendTransferFeedback("AutoAuction transfer run failed: no inventory items matching " + itemName + ".");
+			return false;
+		}
+		if (!modSocketClient.runTransfer(quantity)) {
+			sendTransferFeedback("AutoAuction transfer run failed: mod socket is not connected yet.");
+			return false;
+		}
+		startTransferPurseTracking("sender", client);
+		sendTransferFeedback("AutoAuction transfer " + (loopContinuation ? "next cycle" : "run")
+			+ " requested for " + quantity + "x " + itemName + ".");
+		return true;
+	}
+
+	private void requestBazaarTransferEstimate(String itemName, int quantity, long targetCoins) {
+		String productId = BazaarProductId.fromItemName(itemName);
+		CompletableFuture
+			.supplyAsync(() -> HypixelBazaarClient.fetchQuickStatus(productId)
+				.flatMap(status -> BazaarTransferEstimate.fromPrices(status.productId(), quantity, targetCoins, status.buyPrice(), status.sellPrice())))
+			.thenAccept(estimate -> estimate.ifPresentOrElse(
+				value -> sendTransferFeedback("AutoAuction transfer estimate for " + value.productId()
+					+ ": about " + formatCoins(value.estimatedDeltaPerCycle())
+					+ " coins/cycle after tax, about " + value.estimatedCycles()
+					+ " cycles for " + formatCoins(value.targetCoins()) + "."),
+				() -> sendTransferFeedback("AutoAuction transfer estimate unavailable for " + productId + "; continuing with live purse deltas.")
+			))
+			.exceptionally(error -> {
+				sendTransferFeedback("AutoAuction transfer estimate unavailable for " + productId + "; continuing with live purse deltas.");
+				return null;
+			});
 	}
 
 	private int dumpOpenSlots(Minecraft client) {
@@ -806,8 +906,9 @@ public class AutoauctionClient implements ClientModInitializer {
 		);
 	}
 
-	private void finishTransferPurseTracking(Minecraft client) {
-		transferPurseTracker.finish(currentPurse(client)).ifPresent(summary -> {
+	private Optional<TransferPurseTracker.Summary> finishTransferPurseTracking(Minecraft client) {
+		Optional<TransferPurseTracker.Summary> result = transferPurseTracker.finish(currentPurse(client));
+		result.ifPresent(summary -> {
 			String message = "AutoAuction transfer " + summary.role()
 				+ " purse before=" + formatCoins(summary.before())
 				+ " after=" + formatCoins(summary.after())
@@ -817,6 +918,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				client.player.sendSystemMessage(Component.literal(message));
 			}
 		});
+		return result;
 	}
 
 	private String formatOptionalPurse(OptionalLong purse) {
@@ -1895,7 +1997,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case CLOSE_AFTER_CLAIM -> {
 					actions.closeScreen(client);
-					finishTransferPurseTracking(client);
+					Optional<TransferPurseTracker.Summary> summary = finishTransferPurseTracking(client);
+					long delta = summary.map(TransferPurseTracker.Summary::delta).orElse(0L);
+					if (!modSocketClient.cycleComplete(quantity, delta)) {
+						fail(client, "could not notify sender that receiver cycle completed");
+						return;
+					}
 					done(client, "AutoAuction transfer receiver claimed sell offer coins for " + quantity + "x " + itemName + ".");
 				}
 				case DONE, ERROR -> {
