@@ -7,6 +7,7 @@ import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.config.AutoAuctionConfigStore;
 import com.autoauction.client.control.ModSocketClient;
+import com.autoauction.client.debug.SkyBlockIslandGuard;
 import com.autoauction.client.debug.SkyBlockStatus;
 import com.autoauction.client.debug.StatusDumpFormatter;
 import com.autoauction.client.domain.ArmorPiece;
@@ -830,6 +831,25 @@ public class AutoauctionClient implements ClientModInitializer {
 		return (coins >= 0 ? "+" : "") + formatCoins(coins);
 	}
 
+	private boolean isOnPrivateIsland(Minecraft client) {
+		return !SkyBlockIslandGuard.needsPrivateIslandWarp(currentSkyBlockStatus(client));
+	}
+
+	private boolean sendIslandWarpIfNeeded(Minecraft client, String reason) {
+		SkyBlockStatus status = currentSkyBlockStatus(client);
+		if (!SkyBlockIslandGuard.needsPrivateIslandWarp(status)) {
+			Autoauction.LOGGER.info("AutoAuction already on Private Island for {}.", reason);
+			return false;
+		}
+		Autoauction.LOGGER.info(
+			"AutoAuction sending /is for {} from area={}.",
+			reason,
+			status.area().orElse("unknown")
+		);
+		actions.sendChatCommand(client, "/is");
+		return true;
+	}
+
 	private List<String> readScoreboardLines(Minecraft client) {
 		ClientPacketListener connection = client.getConnection();
 		Scoreboard scoreboard = connection != null ? connection.scoreboard() : null;
@@ -1046,6 +1066,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum ReceiverBuyOrderState {
 		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
 		WAIT_ITEM_PAGE,
 		CLICK_CREATE_BUY_ORDER,
 		WAIT_AMOUNT_SCREEN,
@@ -1091,6 +1112,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "receiver buy order")) {
+						transition(ReceiverBuyOrderState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(ReceiverBuyOrderState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
 					actions.sendChatCommand(client, "/bz " + itemName);
 					transition(ReceiverBuyOrderState.WAIT_ITEM_PAGE, client);
 				}
@@ -1239,6 +1268,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum ReceiverSellOfferState {
 		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
 		WAIT_BAZAAR,
 		CLICK_MANAGE_ORDERS,
 		WAIT_ORDERS,
@@ -1286,6 +1316,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "receiver sell offer")) {
+						transition(ReceiverSellOfferState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz");
+					transition(ReceiverSellOfferState.WAIT_BAZAAR, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
 					actions.sendChatCommand(client, "/bz");
 					transition(ReceiverSellOfferState.WAIT_BAZAAR, client);
 				}
@@ -1437,6 +1475,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum SenderInstantSellState {
 		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
 		WAIT_ITEM_PAGE,
 		CLICK_SELL_INSTANTLY,
 		WAIT_WARNING_OR_DONE,
@@ -1476,6 +1515,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "sender instant sell")) {
+						transition(SenderInstantSellState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(SenderInstantSellState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
 					actions.sendChatCommand(client, "/bz " + itemName);
 					transition(SenderInstantSellState.WAIT_ITEM_PAGE, client);
 				}
@@ -1581,6 +1628,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum SenderInstantBuyState {
 		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
 		WAIT_ITEM_PAGE,
 		CLICK_BUY_INSTANTLY,
 		WAIT_AMOUNT_SCREEN,
@@ -1624,6 +1672,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "sender instant buy")) {
+						transition(SenderInstantBuyState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(SenderInstantBuyState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
 					actions.sendChatCommand(client, "/bz " + itemName);
 					transition(SenderInstantBuyState.WAIT_ITEM_PAGE, client);
 				}
@@ -1756,6 +1812,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private enum ReceiverClaimSellOfferState {
 		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
 		WAIT_BAZAAR,
 		CLICK_MANAGE_ORDERS,
 		WAIT_ORDERS,
@@ -1796,6 +1853,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "receiver sell-offer claim")) {
+						transition(ReceiverClaimSellOfferState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz");
+					transition(ReceiverClaimSellOfferState.WAIT_BAZAAR, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
 					actions.sendChatCommand(client, "/bz");
 					transition(ReceiverClaimSellOfferState.WAIT_BAZAAR, client);
 				}
@@ -1999,8 +2064,13 @@ public class AutoauctionClient implements ClientModInitializer {
 					transition(RealAuctionState.RETURN_TO_ISLAND_BEFORE_ARMOR, client);
 				}
 				case RETURN_TO_ISLAND_BEFORE_ARMOR -> {
+					if (isOnPrivateIsland(client)) {
+						debug(client, "Already on Private Island before removing armor.");
+						transitionNow(RealAuctionState.CHECK_INVENTORY_SPACE, client);
+						return;
+					}
 					debug(client, "Returning to island before removing armor.");
-					actions.sendChatCommand(client, "/is");
+					sendIslandWarpIfNeeded(client, "armor removal");
 					transition(RealAuctionState.WAIT_ISLAND_BEFORE_ARMOR, client, islandCommandCooldownDelayMs());
 				}
 				case WAIT_ISLAND_BEFORE_ARMOR -> {
