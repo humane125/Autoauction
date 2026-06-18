@@ -4,12 +4,16 @@ import com.autoauction.Autoauction;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -28,6 +32,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private final ScheduledExecutorService heartbeatExecutor;
 	private final Consumer<String> logSink;
 	private final Consumer<String> disconnectHandler;
+	private final TransferHandler transferHandler;
 
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
@@ -45,6 +50,10 @@ public final class ModSocketClient implements AutoCloseable {
 		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), disconnectHandler);
 	}
 
+	public ModSocketClient(AutoAuctionConfig config, Consumer<String> disconnectHandler, TransferHandler transferHandler) {
+		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), disconnectHandler, transferHandler);
+	}
+
 	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs) {
 		this(config, transport, heartbeatIntervalMs, message -> Autoauction.LOGGER.info(message), reason -> {});
 	}
@@ -54,11 +63,23 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs, Consumer<String> logSink, Consumer<String> disconnectHandler) {
+		this(config, transport, heartbeatIntervalMs, logSink, disconnectHandler, TransferHandler.NOOP);
+	}
+
+	ModSocketClient(
+		AutoAuctionConfig config,
+		Transport transport,
+		long heartbeatIntervalMs,
+		Consumer<String> logSink,
+		Consumer<String> disconnectHandler,
+		TransferHandler transferHandler
+	) {
 		this.config = config;
 		this.transport = transport;
 		this.heartbeatIntervalMs = heartbeatIntervalMs;
 		this.logSink = logSink;
 		this.disconnectHandler = disconnectHandler;
+		this.transferHandler = transferHandler == null ? TransferHandler.NOOP : transferHandler;
 		this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
 			Thread thread = new Thread(runnable, "autoauction-mod-socket-heartbeat");
 			thread.setDaemon(true);
@@ -170,7 +191,82 @@ public final class ModSocketClient implements AutoCloseable {
 			String reason = stringProperty(message, "reason", "AutoAuction remote disconnect requested.");
 			log("AutoAuction mod socket received disconnect_now: " + reason);
 			disconnectHandler.accept(reason);
+			return;
 		}
+		if (Objects.equals(type, "transfer_accounts")) {
+			transferHandler.onAccounts(transferAccounts(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_invite")) {
+			transferHandler.onInvite(transferSession(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_pending")) {
+			transferHandler.onPending(transferSession(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_accepted")) {
+			transferHandler.onAccepted(transferSession(message), stringProperty(message, "role", ""));
+			return;
+		}
+		if (Objects.equals(type, "transfer_declined")) {
+			transferHandler.onDeclined(transferSession(message), stringProperty(message, "reason", "declined"));
+			return;
+		}
+		if (Objects.equals(type, "transfer_cancelled")) {
+			transferHandler.onCancelled(stringProperty(message, "sessionId", ""), stringProperty(message, "reason", "cancelled"));
+			return;
+		}
+		if (Objects.equals(type, "transfer_run")) {
+			transferHandler.onRun(transferRun(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_run_sent")) {
+			transferHandler.onRunSent(transferRun(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_buy_order_ready")) {
+			transferHandler.onBuyOrderReady(transferRun(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_error")) {
+			transferHandler.onError(stringProperty(message, "code", "unknown"), stringProperty(message, "message", "Transfer failed"));
+		}
+	}
+
+	private List<TransferAccount> transferAccounts(JsonObject message) {
+		List<TransferAccount> accounts = new ArrayList<>();
+		if (!message.has("accounts") || !message.get("accounts").isJsonArray()) {
+			return accounts;
+		}
+		JsonArray array = message.getAsJsonArray("accounts");
+		for (JsonElement element : array) {
+			if (!element.isJsonObject()) {
+				continue;
+			}
+			JsonObject account = element.getAsJsonObject();
+			accounts.add(new TransferAccount(
+				stringProperty(account, "minecraftUsername", ""),
+				stringProperty(account, "status", "")
+			));
+		}
+		return accounts;
+	}
+
+	private TransferSession transferSession(JsonObject message) {
+		JsonObject session = message.has("session") && message.get("session").isJsonObject()
+			? message.getAsJsonObject("session")
+			: new JsonObject();
+		return new TransferSession(
+			stringProperty(session, "id", ""),
+			stringProperty(session, "senderUsername", ""),
+			stringProperty(session, "receiverUsername", ""),
+			stringProperty(session, "itemName", "")
+		);
+	}
+
+	private TransferRun transferRun(JsonObject message) {
+		return new TransferRun(transferSession(message), intProperty(message, "quantity", 1));
 	}
 
 	private String stringProperty(JsonObject message, String name, String fallback) {
@@ -179,6 +275,17 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 		String value = message.get(name).getAsString();
 		return value == null || value.isBlank() ? fallback : value;
+	}
+
+	private int intProperty(JsonObject message, String name, int fallback) {
+		if (!message.has(name) || message.get(name).isJsonNull()) {
+			return fallback;
+		}
+		try {
+			return Math.max(1, message.get(name).getAsInt());
+		} catch (RuntimeException ignored) {
+			return fallback;
+		}
 	}
 
 	public synchronized boolean reportStatus(String status) {
@@ -193,6 +300,63 @@ public final class ModSocketClient implements AutoCloseable {
 			return false;
 		}
 		return sendBan(details);
+	}
+
+	public synchronized boolean requestTransferAccounts() {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_list");
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean inviteTransfer(String receiverUsername, String itemName) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_invite");
+		message.addProperty("receiverUsername", String.valueOf(receiverUsername == null ? "" : receiverUsername).trim());
+		message.addProperty("itemName", String.valueOf(itemName == null ? "" : itemName).trim());
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean acceptTransfer(String senderUsername) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_accept");
+		message.addProperty("senderUsername", String.valueOf(senderUsername == null ? "" : senderUsername).trim());
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean declineTransfer(String senderUsername) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_decline");
+		message.addProperty("senderUsername", String.valueOf(senderUsername == null ? "" : senderUsername).trim());
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean cancelTransfer() {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_cancel");
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean runTransfer(int quantity) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_run");
+		message.addProperty("quantity", Math.max(1, quantity));
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean buyOrderReady(int quantity) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_buy_order_ready");
+		message.addProperty("quantity", Math.max(1, quantity));
+		return sendTransferMessage(message);
+	}
+
+	private synchronized boolean sendTransferMessage(JsonObject message) {
+		if (!authenticated || connection == null) {
+			return false;
+		}
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket sent " + message.get("type").getAsString());
+		return true;
 	}
 
 	private synchronized boolean sendStatus(String status) {
@@ -316,6 +480,50 @@ public final class ModSocketClient implements AutoCloseable {
 		void onClose();
 
 		void onError(Throwable error);
+	}
+
+	public interface TransferHandler {
+		TransferHandler NOOP = new TransferHandler() {
+		};
+
+		default void onAccounts(List<TransferAccount> accounts) {
+		}
+
+		default void onInvite(TransferSession session) {
+		}
+
+		default void onPending(TransferSession session) {
+		}
+
+		default void onAccepted(TransferSession session, String role) {
+		}
+
+		default void onDeclined(TransferSession session, String reason) {
+		}
+
+		default void onCancelled(String sessionId, String reason) {
+		}
+
+		default void onRun(TransferRun run) {
+		}
+
+		default void onRunSent(TransferRun run) {
+		}
+
+		default void onBuyOrderReady(TransferRun run) {
+		}
+
+		default void onError(String code, String message) {
+		}
+	}
+
+	public record TransferAccount(String minecraftUsername, String status) {
+	}
+
+	public record TransferSession(String id, String senderUsername, String receiverUsername, String itemName) {
+	}
+
+	public record TransferRun(TransferSession session, int quantity) {
 	}
 
 	private record AuthMessage(String type, String apiKey, String username, String clientVersion) {

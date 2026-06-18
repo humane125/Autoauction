@@ -92,6 +92,21 @@ public final class MinecraftGameActions {
 		return emptySlots >= requiredSlots;
 	}
 
+	public int countInventoryItemsByName(Minecraft client, String itemNamePart) {
+		if (client.player == null) {
+			return 0;
+		}
+
+		int count = 0;
+		for (int slot = 0; slot < client.player.getInventory().getContainerSize(); slot++) {
+			ItemStack stack = client.player.getInventory().getItem(slot);
+			if (!stack.isEmpty() && itemNameMatches(stack.getHoverName().getString(), itemNamePart)) {
+				count += stack.getCount();
+			}
+		}
+		return count;
+	}
+
 	public void quickMoveEquippedArmorToInventory(Minecraft client) {
 		if (client.player == null || client.gameMode == null) {
 			return;
@@ -115,6 +130,10 @@ public final class MinecraftGameActions {
 	}
 
 	public void closeScreen(Minecraft client) {
+		if (client.player != null && client.screen != null) {
+			client.player.closeContainer();
+			return;
+		}
 		client.setScreen(null);
 	}
 
@@ -193,7 +212,11 @@ public final class MinecraftGameActions {
 	}
 
 	public Optional<Integer> findHandlerSlotByItemName(Minecraft client, String itemNamePart) {
-		return findHandlerSlotByItemNameMatching(client, itemName -> itemName.contains(itemNamePart));
+		return findHandlerSlotByItemNameMatching(client, itemName -> itemNameMatches(itemName, itemNamePart));
+	}
+
+	public Optional<Integer> findHandlerSlotByExactItemName(Minecraft client, String itemName) {
+		return findHandlerSlotByItemNameMatching(client, candidate -> itemNameExactlyMatches(candidate, itemName));
 	}
 
 	private Optional<Integer> findHandlerSlotByItemNameMatching(Minecraft client, Predicate<String> matcher) {
@@ -226,10 +249,26 @@ public final class MinecraftGameActions {
 		return containsIgnoreCase(itemName, "Selling whole inventory");
 	}
 
+	static boolean itemNameMatches(String itemName, String expectedPart) {
+		String expected = comparableItemName(expectedPart);
+		return !expected.isBlank() && comparableItemName(itemName).contains(expected);
+	}
+
+	static boolean itemNameExactlyMatches(String itemName, String expectedName) {
+		String expected = comparableItemName(expectedName);
+		return !expected.isBlank() && comparableItemName(itemName).equals(expected);
+	}
+
 	private static boolean containsIgnoreCase(String value, String expectedPart) {
 		return String.valueOf(value == null ? "" : value)
 			.toLowerCase(Locale.ROOT)
 			.contains(String.valueOf(expectedPart == null ? "" : expectedPart).toLowerCase(Locale.ROOT));
+	}
+
+	private static String comparableItemName(String value) {
+		return String.valueOf(value == null ? "" : value)
+			.toLowerCase(Locale.ROOT)
+			.replaceAll("[^a-z0-9]", "");
 	}
 
 	public boolean submitSignText(Minecraft client, String text) {

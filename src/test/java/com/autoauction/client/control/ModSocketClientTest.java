@@ -229,6 +229,145 @@ class ModSocketClientTest {
 		client.close();
 	}
 
+	@Test
+	void sendsTransferCommandPayloadsAfterAuthOk() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SenderPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		client.requestTransferAccounts();
+		client.inviteTransfer("ReceiverPlayer", "ENCHANTED DIAMOND");
+		client.acceptTransfer("SenderPlayer");
+		client.declineTransfer("SenderPlayer");
+		client.cancelTransfer();
+		client.runTransfer(128);
+		client.buyOrderReady(128);
+
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_list\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_invite\"")
+			&& message.contains("\"receiverUsername\":\"ReceiverPlayer\"")
+			&& message.contains("\"itemName\":\"ENCHANTED DIAMOND\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_accept\"")
+			&& message.contains("\"senderUsername\":\"SenderPlayer\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_decline\"")
+			&& message.contains("\"senderUsername\":\"SenderPlayer\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_cancel\"")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_run\"")
+			&& message.contains("\"quantity\":128")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_buy_order_ready\"")
+			&& message.contains("\"quantity\":128")));
+		client.close();
+	}
+
+	@Test
+	void ignoresTransferCommandPayloadsBeforeAuthOk() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SenderPlayer", "26.1.1");
+		transport.open();
+
+		assertFalse(client.requestTransferAccounts());
+		assertFalse(client.inviteTransfer("ReceiverPlayer", "ENCHANTED DIAMOND"));
+		assertFalse(client.acceptTransfer("SenderPlayer"));
+		assertFalse(client.declineTransfer("SenderPlayer"));
+		assertFalse(client.cancelTransfer());
+		assertFalse(client.runTransfer(128));
+		assertFalse(client.buyOrderReady(128));
+		assertEquals(1, transport.connection.sentMessages.size());
+		client.close();
+	}
+
+	@Test
+	void invokesTransferHandlerForIncomingServerMessages() {
+		FakeTransport transport = new FakeTransport();
+		List<String> events = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000, message -> {}, reason -> {}, new ModSocketClient.TransferHandler() {
+			@Override
+			public void onAccounts(List<ModSocketClient.TransferAccount> accounts) {
+				events.add("accounts:" + accounts.size() + ":" + accounts.getFirst().minecraftUsername());
+			}
+
+			@Override
+			public void onInvite(ModSocketClient.TransferSession session) {
+				events.add("invite:" + session.senderUsername() + ":" + session.itemName());
+			}
+
+			@Override
+			public void onPending(ModSocketClient.TransferSession session) {
+				events.add("pending:" + session.receiverUsername());
+			}
+
+			@Override
+			public void onAccepted(ModSocketClient.TransferSession session, String role) {
+				events.add("accepted:" + role + ":" + session.id());
+			}
+
+			@Override
+			public void onDeclined(ModSocketClient.TransferSession session, String reason) {
+				events.add("declined:" + reason);
+			}
+
+			@Override
+			public void onCancelled(String sessionId, String reason) {
+				events.add("cancelled:" + sessionId + ":" + reason);
+			}
+
+			@Override
+			public void onRun(ModSocketClient.TransferRun run) {
+				events.add("run:" + run.session().itemName() + ":" + run.quantity());
+			}
+
+			@Override
+			public void onRunSent(ModSocketClient.TransferRun run) {
+				events.add("run-sent:" + run.session().receiverUsername() + ":" + run.quantity());
+			}
+
+			@Override
+			public void onBuyOrderReady(ModSocketClient.TransferRun run) {
+				events.add("buy-order-ready:" + run.session().itemName() + ":" + run.quantity());
+			}
+
+			@Override
+			public void onError(String code, String message) {
+				events.add("error:" + code + ":" + message);
+			}
+		});
+
+		client.start("SenderPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		transport.message("{\"type\":\"transfer_accounts\",\"accounts\":[{\"minecraftUsername\":\"ReceiverPlayer\",\"status\":\"hypixel\"}]}");
+		transport.message("{\"type\":\"transfer_invite\",\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_pending\",\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_accepted\",\"role\":\"sender\",\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_declined\",\"reason\":\"not ready\",\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_cancelled\",\"sessionId\":\"s1\",\"reason\":\"sender cancelled\"}");
+		transport.message("{\"type\":\"transfer_run\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_run_sent\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_buy_order_ready\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_error\",\"code\":\"target_offline\",\"message\":\"ReceiverPlayer is not connected\"}");
+
+		assertEquals(List.of(
+			"accounts:1:ReceiverPlayer",
+			"invite:SenderPlayer:ENCHANTED DIAMOND",
+			"pending:ReceiverPlayer",
+			"accepted:sender:s1",
+			"declined:not ready",
+			"cancelled:s1:sender cancelled",
+			"run:ENCHANTED DIAMOND:128",
+			"run-sent:ReceiverPlayer:128",
+			"buy-order-ready:ENCHANTED DIAMOND:128",
+			"error:target_offline:ReceiverPlayer is not connected"
+		), events);
+		client.close();
+	}
+
 	private AutoAuctionConfig config(String baseUrl, String apiKey) {
 		return new AutoAuctionConfig(baseUrl, apiKey, "", "", "/stopmacro", "", "/hub", true, 25_000, 8_000, 250, 5_000);
 	}

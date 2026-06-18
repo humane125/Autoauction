@@ -54,4 +54,9 @@ class AutoauctionClientTest {
 	void waitsFiveAndHalfSecondsAfterIslandReturnBeforeMoreCommands() {
 		assertEquals(5_500, AutoauctionClient.islandCommandCooldownDelayMs());
 	}
+
+	@Test
+	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
+		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
+	}
 }

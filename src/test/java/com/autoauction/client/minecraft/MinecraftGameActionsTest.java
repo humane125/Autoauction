@@ -27,4 +27,19 @@ class MinecraftGameActionsTest {
 		assertFalse(MinecraftGameActions.isSellInventoryConfirmTitle("Create BIN Auction"));
 		assertFalse(MinecraftGameActions.isSellInventoryConfirmName("Cancel"));
 	}
+
+	@Test
+	void matchesInventoryItemNamesIgnoringCase() {
+		assertTrue(MinecraftGameActions.itemNameMatches("Ender Pearl", "ender pearl"));
+		assertTrue(MinecraftGameActions.itemNameMatches("Enchanted Ender Pearl", "ender pearl"));
+		assertFalse(MinecraftGameActions.itemNameMatches("Aspect of the End", "ender pearl"));
+	}
+
+	@Test
+	void exactItemNameMatchDoesNotSelectRelatedBazaarItems() {
+		assertTrue(MinecraftGameActions.itemNameExactlyMatches("Ender Pearl", "ender pearl"));
+		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Absolute Ender Pearl", "ender pearl"));
+		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Enchanted Ender Pearl", "ender pearl"));
+		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Tessellated Ender Pearl", "ender pearl"));
+	}
 }
