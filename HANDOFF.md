@@ -2,96 +2,85 @@
 
 Date: 2026-06-18
 Branch: `main`
+Latest local commit before this handoff: `e18d99d Resolve bazaar product id aliases`
 
 ## Current Setup
 
-- Local repo: `C:\Humane\Hypixel\Minecraft Mod\26.1.1`
+- Local repo: `C:\Projects\Hypixel\Minecraft Mod\26.1.1`
 - GitHub remote: `https://github.com/humane125/Autoauction.git`
-- Public API URL: `https://lazy-similarly-reaffirm.ngrok-free.dev`
+- Current public API URL: `https://humane-hypixel.duckdns.org`
+- Old ngrok URL is deprecated: `https://lazy-similarly-reaffirm.ngrok-free.dev`
 - Built jar: `build\libs\autoauction-1.0.0.jar`
-- Prism live mods folder: `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods`
-- Prism test mods folder: `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test\minecraft\mods`
+- Active Prism mod folders:
+  - `C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods`
+  - `C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2 rivoh\minecraft\mods`
 
-Do not commit real API tokens, Discord webhooks, Discord user IDs, local configs, or `logs/`.
+Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs/`, or Minecraft account data.
 
-## Current Behavior
+## What Happened
 
-- AutoAuction owns auction listing, macro handoff orchestration, and the connected transfer client commands.
-- Alt Manager owns account switching and proxy fetch.
-- API websocket status uses `active`, `hypixel`, `offline`, and `banned`.
+- Transfer automation was completed beyond the old buy-order-only handoff.
+- Sender now instant-sells into the receiver buy order, then instant-buys the receiver sell offer.
+- Receiver now claims the filled buy order, creates the sell offer, waits for sender buy-back, claims coins, and sends `transfer_cycle_complete`.
+- Transfer target loops now continue until the receiver-reported purse delta reaches or exceeds the requested target.
+- Final target output now reports receiver starting purse, done purse, and total delta.
+- Receiver claim delta waits for purse update to avoid stale scoreboard/negative delta.
+- Transfer debug messages were made clearer with workflow, state, item, quantity, and delay details.
+- Bazaar estimate math was fixed: Hypixel `quick_status.sellPrice` is the receiver buy cost side and `quick_status.buyPrice` is the receiver sell revenue side.
+- Bazaar product ID resolution was hardened:
+  - Exact product ID match first.
+  - Aliases for known mismatches such as `NETHER_WART_DISTILLATE -> NETHER_STALK_DISTILLATE`.
+  - Ordered-token fallback for cases like `Glowstone Distillate -> GLOWSTONE_DUST_DISTILLATE`.
+  - Ambiguous matches do not guess.
+- Latest jars were copied to both listed Prism mod folders after build.
+- The 26.1.2 Prism runtime configs were manually updated to `https://humane-hypixel.duckdns.org`.
+
+## Current Transfer Commands
+
+- `/autoauction transfer list`
+- `/autoauction transfer <receiverUsername> <itemName...>`
+- `/autoauction transfer accept <senderUsername>`
+- `/autoauction transfer decline <senderUsername>`
+- `/autoauction transfer cancel`
+- `/autoauction transfer run`
+- `/autoauction transfer run <targetCoins>`
+
+Target examples support suffixes such as `k`, `m`, and `b`.
+
+## Current Runtime Behavior
+
+- AutoAuction websocket connects to `<apiBaseUrl>/api/mod/ws`, converting `https://` to `wss://`.
+- Current expected socket URL is `wss://humane-hypixel.duckdns.org/api/mod/ws`.
 - Start/stop macro commands are client-side mod commands.
-- Real listing mode asks the API for recommended BIN pricing.
 - Before taking off armor, the mod sends `/is` and waits 5.5 seconds.
-- If inventory has no empty slot, the mod opens `/bz`, clicks `Sell Inventory Now`, confirms selling the whole inventory, then retries inventory-space checks.
-- After listing armor, AutoAuction asks Alt Manager to switch to the next account, waits for proxy readiness, waits 1.5 seconds, reconnects to Hypixel, waits for player/server availability, then can send the configured macro start command.
-
-## Connected Transfer Commands
-
-- `/autoauction transfer list` shows currently connected mod clients from the API.
-- `/autoauction transfer <receiverUsername> <itemName...>` invites a connected receiver. The current account is the sender.
-- `/autoauction transfer accept <senderUsername>` accepts an invite.
-- `/autoauction transfer decline <senderUsername>` declines an invite.
-- `/autoauction transfer cancel` cancels the current pending or accepted session.
-- `/autoauction transfer run` starts the current accepted transfer automation.
-
-The item argument is greedy, so names like `ENCHANTED DIAMOND` and `Blaze Rod Distillate` are accepted.
-
-## Transfer Automation State
-
-Implemented flow:
-
-1. Sender runs `/autoauction transfer run`.
-2. Sender scans its inventory for the configured item and sends the quantity to the receiver.
-3. Receiver opens `/bz <item>`, clicks the item result in `Bazaar -> "<item>"`, opens the item page, creates a buy order, chooses `Custom Amount`, submits the sender quantity, chooses `Top Order +0.1`, and confirms the buy order.
-4. Receiver notifies the sender through the API with `transfer_buy_order_ready`.
-5. Sender opens `/bz <item>`, clicks the item result, opens the item page, clicks `Sell Instantly`, handles the optional instant-sell warning by waiting 6 seconds, confirms, then closes the Bazaar menu.
-6. Receiver listens for the filled buy-order chat message. Minecraft color codes are stripped before matching messages like `[Bazaar] Your Buy Order for 1x Blaze Rod Distillate was filled!`.
-7. Receiver opens `/bz`, clicks `Manage Orders`, finds the buy order for the configured item, claims it, closes Bazaar, opens `/bz <item>`, creates a sell offer, chooses `Best Offer -0.1`, and confirms the sell offer.
-
-Menu matching supports:
-
-- Search result titles shaped like `Bazaar -> "<item>"`
-- Grouped or truncated item pages shaped like `<category> -> <item prefix>`, for example `Inferno Demonlord -> Blaze Rod D`
-- Truncated item names by matching normalized prefixes against the configured item words
-
-## Known Limits
-
-- The transfer flow does not yet loop automatically after the receiver creates the sell offer.
-- The sender does not yet buy the receiver sell offer back.
-- Sell-offer fill detection and sell-offer claim handling are not implemented yet.
-- Quantity, margin limits, cycle count, and stop-loss controls are not configurable yet.
-- Failure recovery is basic; if a menu appears in a new shape, the workflow reports a failure and stops.
-- Websocket reconnect/backoff after API or ngrok restarts is still needed.
+- If inventory has no empty slot, the mod opens `/bz`, clicks sell-inventory flow, confirms, then retries.
+- After armor listing, AutoAuction asks Alt Manager for account switch/proxy handoff, waits for proxy readiness, waits 1.5 seconds, reconnects to Hypixel, waits for player/server availability, waits 0.5 seconds, then can run the macro start command.
+- Bazaar transfer starts from private island checks where implemented.
 
 ## Verification
 
-Run locally:
+Latest local verification before this handoff:
 
 ```powershell
-.\gradlew.bat --no-daemon test
-.\gradlew.bat --no-daemon build
+.\gradlew.bat test --tests com.autoauction.client.transfer.BazaarTransferEstimateTest
+.\gradlew.bat build
 ```
 
-Latest local verification on 2026-06-18:
-
-- `.\gradlew.bat --no-daemon test` passed.
-- `.\gradlew.bat --no-daemon build` passed.
+Both passed. The full build produced `autoauction-1.0.0.jar` and it was copied to both active Prism instances.
 
 ## Build And Copy
 
 ```powershell
-.\gradlew.bat --no-daemon build
-Copy-Item "C:\Humane\Hypixel\Minecraft Mod\26.1.1\build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods\autoauction-1.0.0.jar" -Force
-Copy-Item "C:\Humane\Hypixel\Minecraft Mod\26.1.1\build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test\minecraft\mods\autoauction-1.0.0.jar" -Force
+cd "C:\Projects\Hypixel\Minecraft Mod\26.1.1"
+.\gradlew.bat build
+Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods\autoauction-1.0.0.jar" -Force
+Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2 rivoh\minecraft\mods\autoauction-1.0.0.jar" -Force
 ```
-
-Latest jar was copied to both Prism instances on 2026-06-18.
 
 ## Next Work
 
-1. Implement sender buy-back from the receiver sell offer.
-2. Add receiver sell-offer fill detection and claim handling.
-3. Add automatic transfer cycling until configured stop conditions are reached.
-4. Add configurable quantity, max cycles, margin threshold, and coin safety checks.
-5. Add websocket reconnect/backoff and resend current status after reconnect.
-6. Test more item families with grouped and truncated Bazaar pages.
+1. Add websocket reconnect/backoff and resend current status after reconnect.
+2. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
+3. Add configurable transfer quantity, max cycles, margin threshold, and safety controls.
+4. Continue testing Bazaar product ID resolution with more item families.
+5. Commit any future runtime-flow changes immediately after verification.
