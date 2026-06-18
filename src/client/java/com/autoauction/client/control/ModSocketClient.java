@@ -237,6 +237,10 @@ public final class ModSocketClient implements AutoCloseable {
 			transferHandler.onSellOfferBought(transferRun(message));
 			return;
 		}
+		if (Objects.equals(type, "transfer_cycle_complete")) {
+			transferHandler.onCycleComplete(transferCycle(message));
+			return;
+		}
 		if (Objects.equals(type, "transfer_error")) {
 			transferHandler.onError(stringProperty(message, "code", "unknown"), stringProperty(message, "message", "Transfer failed"));
 		}
@@ -277,6 +281,10 @@ public final class ModSocketClient implements AutoCloseable {
 		return new TransferRun(transferSession(message), intProperty(message, "quantity", 1));
 	}
 
+	private TransferCycle transferCycle(JsonObject message) {
+		return new TransferCycle(transferSession(message), intProperty(message, "quantity", 1), longProperty(message, "delta", 0));
+	}
+
 	private String stringProperty(JsonObject message, String name, String fallback) {
 		if (!message.has(name) || message.get(name).isJsonNull()) {
 			return fallback;
@@ -291,6 +299,17 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 		try {
 			return Math.max(1, message.get(name).getAsInt());
+		} catch (RuntimeException ignored) {
+			return fallback;
+		}
+	}
+
+	private long longProperty(JsonObject message, String name, long fallback) {
+		if (!message.has(name) || message.get(name).isJsonNull()) {
+			return fallback;
+		}
+		try {
+			return message.get(name).getAsLong();
 		} catch (RuntimeException ignored) {
 			return fallback;
 		}
@@ -369,6 +388,14 @@ public final class ModSocketClient implements AutoCloseable {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "transfer_sell_offer_bought");
 		message.addProperty("quantity", Math.max(1, quantity));
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean cycleComplete(int quantity, long delta) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_cycle_complete");
+		message.addProperty("quantity", Math.max(1, quantity));
+		message.addProperty("delta", delta);
 		return sendTransferMessage(message);
 	}
 
@@ -541,6 +568,9 @@ public final class ModSocketClient implements AutoCloseable {
 		default void onSellOfferBought(TransferRun run) {
 		}
 
+		default void onCycleComplete(TransferCycle cycle) {
+		}
+
 		default void onError(String code, String message) {
 		}
 	}
@@ -552,6 +582,9 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public record TransferRun(TransferSession session, int quantity) {
+	}
+
+	public record TransferCycle(TransferSession session, int quantity, long delta) {
 	}
 
 	private record AuthMessage(String type, String apiKey, String username, String clientVersion) {
