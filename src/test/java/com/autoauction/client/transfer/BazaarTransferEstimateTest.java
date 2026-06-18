@@ -2,6 +2,8 @@ package com.autoauction.client.transfer;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,5 +34,18 @@ class BazaarTransferEstimateTest {
 		assertEquals("ENCHANTED_DIAMOND", BazaarProductId.fromItemName("Enchanted Diamond"));
 		assertEquals("MAGMA_CREAM_DISTILLATE", BazaarProductId.fromItemName("Magma Cream Distillate"));
 		assertEquals("RAW_SOULFLOW", BazaarProductId.fromItemName("§9Raw Soulflow"));
+	}
+
+	@Test
+	void resolvesKnownDistillateNamesAgainstBazaarProductIds() {
+		Set<String> productIds = Set.of(
+			"GLOWSTONE_DUST_DISTILLATE",
+			"MAGMA_CREAM_DISTILLATE",
+			"NETHER_STALK_DISTILLATE"
+		);
+
+		assertEquals("GLOWSTONE_DUST_DISTILLATE", BazaarProductId.resolveProductId("Glowstone Distillate", productIds));
+		assertEquals("MAGMA_CREAM_DISTILLATE", BazaarProductId.resolveProductId("Magma Cream Distillate", productIds));
+		assertEquals("NETHER_STALK_DISTILLATE", BazaarProductId.resolveProductId("Nether Wart Distillate", productIds));
 	}
 }

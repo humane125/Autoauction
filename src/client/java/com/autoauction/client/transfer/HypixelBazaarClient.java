@@ -38,16 +38,17 @@ public final class HypixelBazaarClient {
 				return Optional.empty();
 			}
 			JsonObject products = root.getAsJsonObject("products");
-			if (!products.has(cleanProductId) || !products.get(cleanProductId).isJsonObject()) {
+			String resolvedProductId = BazaarProductId.resolveProductId(cleanProductId, products.keySet());
+			if (!products.has(resolvedProductId) || !products.get(resolvedProductId).isJsonObject()) {
 				return Optional.empty();
 			}
-			JsonObject product = products.getAsJsonObject(cleanProductId);
+			JsonObject product = products.getAsJsonObject(resolvedProductId);
 			if (!product.has("quick_status") || !product.get("quick_status").isJsonObject()) {
 				return Optional.empty();
 			}
 			JsonObject status = product.getAsJsonObject("quick_status");
 			return Optional.of(new QuickStatus(
-				stringProperty(status, "productId", cleanProductId),
+				stringProperty(status, "productId", resolvedProductId),
 				doubleProperty(status, "buyPrice"),
 				doubleProperty(status, "sellPrice")
 			));
