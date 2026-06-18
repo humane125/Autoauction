@@ -282,7 +282,9 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	private TransferCycle transferCycle(JsonObject message) {
-		return new TransferCycle(transferSession(message), intProperty(message, "quantity", 1), longProperty(message, "delta", 0));
+		long before = longProperty(message, "before", 0);
+		long after = longProperty(message, "after", before);
+		return new TransferCycle(transferSession(message), intProperty(message, "quantity", 1), before, after, longProperty(message, "delta", after - before));
 	}
 
 	private String stringProperty(JsonObject message, String name, String fallback) {
@@ -392,9 +394,15 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean cycleComplete(int quantity, long delta) {
+		return cycleComplete(quantity, 0, delta, delta);
+	}
+
+	public synchronized boolean cycleComplete(int quantity, long before, long after, long delta) {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "transfer_cycle_complete");
 		message.addProperty("quantity", Math.max(1, quantity));
+		message.addProperty("before", before);
+		message.addProperty("after", after);
 		message.addProperty("delta", delta);
 		return sendTransferMessage(message);
 	}
@@ -584,7 +592,7 @@ public final class ModSocketClient implements AutoCloseable {
 	public record TransferRun(TransferSession session, int quantity) {
 	}
 
-	public record TransferCycle(TransferSession session, int quantity, long delta) {
+	public record TransferCycle(TransferSession session, int quantity, long before, long after, long delta) {
 	}
 
 	private record AuthMessage(String type, String apiKey, String username, String clientVersion) {

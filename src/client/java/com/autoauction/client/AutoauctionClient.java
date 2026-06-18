@@ -593,7 +593,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 
-		TransferLoopGoal.Progress progress = goal.recordCycle(cycle.delta());
+		TransferLoopGoal.Progress progress = goal.recordCycle(cycle.delta(), cycle.before(), cycle.after());
 		sendTransferFeedback("AutoAuction transfer target progress: cycle " + progress.cycles()
 			+ ", total=" + formatCoins(progress.totalTransferred())
 			+ "/" + formatCoins(progress.targetCoins())
@@ -601,7 +601,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			+ ", estimated cycles left=" + progress.estimatedCyclesRemaining() + ".");
 		if (progress.complete()) {
 			transferLoopGoal = null;
-			sendTransferFeedback("AutoAuction transfer target reached after " + progress.cycles() + " cycles.");
+			sendTransferFeedback("AutoAuction transfer target reached after " + progress.cycles()
+				+ " cycles. Receiver purse start=" + formatCoins(progress.startingPurse())
+				+ ", done=" + formatCoins(progress.donePurse())
+				+ ", total delta=" + formatSignedCoins(progress.totalPurseDelta()) + ".");
 			return;
 		}
 		if (cycle.delta() <= 0) {
@@ -2014,7 +2017,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (preview.isPresent() && preview.get().delta() >= 0) {
 						Optional<TransferPurseTracker.Summary> summary = finishTransferPurseTracking(client);
 						long delta = summary.map(TransferPurseTracker.Summary::delta).orElse(0L);
-						if (!modSocketClient.cycleComplete(quantity, delta)) {
+						if (!modSocketClient.cycleComplete(quantity, summary.map(TransferPurseTracker.Summary::before).orElse(0L), summary.map(TransferPurseTracker.Summary::after).orElse(0L), delta)) {
 							fail(client, "could not notify sender that receiver cycle completed");
 							return;
 						}
