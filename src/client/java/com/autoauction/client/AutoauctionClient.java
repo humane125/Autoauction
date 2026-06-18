@@ -27,6 +27,7 @@ import com.autoauction.client.transfer.BazaarTransferEstimate;
 import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.HypixelBazaarClient;
 import com.autoauction.client.transfer.TransferController;
+import com.autoauction.client.transfer.TransferDebugMessages;
 import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -933,6 +934,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		return (coins >= 0 ? "+" : "") + formatCoins(coins);
 	}
 
+	private static String transferStep(String role, String phase, int quantity, String itemName, String action) {
+		return TransferDebugMessages.step(role, phase, quantity, itemName, action);
+	}
+
+	private static String transferState(String role, String phase, String state, int quantity, String itemName, int delayMs) {
+		return TransferDebugMessages.state(role, phase, state, quantity, itemName, Math.max(MIN_CLICK_DELAY_MS, delayMs));
+	}
+
 	private boolean isOnPrivateIsland(Minecraft client) {
 		return !SkyBlockIslandGuard.needsPrivateIslandWarp(currentSkyBlockStatus(client));
 	}
@@ -1196,7 +1205,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void start(Minecraft client) {
-			debug(client, "AutoAuction transfer receiver workflow started for " + quantity + "x " + itemName + ".");
+			debug(client, transferStep("receiver", "buy-order", quantity, itemName, "start creating buy order"));
 			transition(ReceiverBuyOrderState.OPEN_BAZAAR, client);
 		}
 
@@ -1230,7 +1239,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
 						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
 						if (itemSlot.isPresent()) {
-							debug(client, "Clicking Bazaar result slot " + itemSlot.get() + " for " + itemName + ".");
+							debug(client, transferStep("receiver", "buy-order", quantity, itemName, "click slot " + itemSlot.get() + " Bazaar search result"));
 							actions.clickSlot(client, itemSlot.get());
 							transition(ReceiverBuyOrderState.WAIT_ITEM_PAGE, client);
 							return;
@@ -1248,7 +1257,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CREATE_BUY_ORDER -> {
 					int slot = actions.findHandlerSlotByItemName(client, "Create Buy Order")
 						.orElse(BazaarTransferWorkflow.CREATE_BUY_ORDER_SLOT);
-					debug(client, "Clicking Create Buy Order slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("receiver", "buy-order", quantity, itemName, "click slot " + slot + " Create Buy Order"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverBuyOrderState.WAIT_AMOUNT_SCREEN, client);
 				}
@@ -1262,7 +1271,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CUSTOM_AMOUNT -> {
 					int slot = actions.findHandlerSlotByItemName(client, "Custom Amount")
 						.orElse(BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
-					debug(client, "Clicking Custom Amount slot " + slot + " for buy order.");
+					debug(client, transferStep("receiver", "buy-order", quantity, itemName, "click slot " + slot + " Custom Amount"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverBuyOrderState.WAIT_AMOUNT_SIGN, client);
 				}
@@ -1275,7 +1284,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case SUBMIT_AMOUNT -> {
 					String amount = BazaarTransferWorkflow.quantityText(quantity);
-					debug(client, "Submitting transfer buy-order amount: " + amount + ".");
+					debug(client, transferStep("receiver", "buy-order", quantity, itemName, "type custom amount " + amount));
 					if (!actions.submitSignText(client, amount)) {
 						fail(client, "could not submit custom buy-order amount");
 						return;
@@ -1292,7 +1301,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_TOP_ORDER_PRICE -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Top Order +0.1")
 						.orElse(BazaarTransferWorkflow.TOP_ORDER_PLUS_0_1_SLOT);
-					debug(client, "Clicking Top Order +0.1 slot " + slot + " for buy order.");
+					debug(client, transferStep("receiver", "buy-order", quantity, itemName, "click slot " + slot + " Top Order +0.1"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverBuyOrderState.WAIT_CONFIRM_BUY_ORDER, client);
 				}
@@ -1306,14 +1315,14 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CONFIRM_BUY_ORDER -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Buy Order")
 						.orElse(BazaarTransferWorkflow.CONFIRM_BUY_ORDER_SLOT);
-					debug(client, "Clicking Confirm Buy Order slot " + slot + " for " + quantity + "x " + itemName + ".");
+					debug(client, transferStep("receiver", "buy-order", quantity, itemName, "click slot " + slot + " Confirm Buy Order"));
 					actions.clickSlot(client, slot);
 					if (!modSocketClient.buyOrderReady(quantity)) {
 						fail(client, "could not notify sender that buy order is ready");
 						return;
 					}
 					pendingTransferFill = new PendingTransferFill(itemName, quantity);
-					done(client, "AutoAuction transfer receiver submitted buy order for " + quantity + "x " + itemName + "; waiting for fill.");
+					done(client, transferStep("receiver", "buy-order", quantity, itemName, "submitted buy order; waiting for sender instant sell"));
 				}
 				case DONE, ERROR -> {
 				}
@@ -1328,7 +1337,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info("AutoAuction transfer receiver workflow state: {}", next);
+			Autoauction.LOGGER.info(transferState("receiver", "buy-order", next.name(), quantity, itemName, delayMs));
 		}
 
 		private void debug(Minecraft client, String message) {
@@ -1400,7 +1409,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void start(Minecraft client) {
-			debug(client, "AutoAuction transfer receiver detected filled buy order for " + quantity + "x " + itemName + ".");
+			debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "buy order filled; claim item and create sell offer"));
 			transition(ReceiverSellOfferState.OPEN_BAZAAR, client);
 		}
 
@@ -1439,7 +1448,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_MANAGE_ORDERS -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Manage Orders")
 						.orElse(BazaarTransferWorkflow.MANAGE_ORDERS_SLOT);
-					debug(client, "Clicking Manage Orders slot " + slot + ".");
+					debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + slot + " Manage Orders"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverSellOfferState.WAIT_ORDERS, client);
 				}
@@ -1453,7 +1462,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_FILLED_BUY_ORDER -> {
 					int slot = actions.findHandlerSlotByItemName(client, "BUY " + itemName)
 						.orElseThrow(() -> new IllegalStateException("filled buy order not found for " + itemName));
-					debug(client, "Clicking filled buy order slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + slot + " filled BUY order to claim items"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverSellOfferState.CLOSE_AFTER_CLAIM, client, bazaarCloseDelayMs());
 				}
@@ -1470,7 +1479,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
 						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
 						if (itemSlot.isPresent()) {
-							debug(client, "Clicking Bazaar result slot " + itemSlot.get() + " for receiver sell offer " + itemName + ".");
+							debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + itemSlot.get() + " Bazaar search result"));
 							actions.clickSlot(client, itemSlot.get());
 							transition(ReceiverSellOfferState.WAIT_ITEM_PAGE, client);
 							return;
@@ -1485,7 +1494,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CREATE_SELL_OFFER -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Create Sell Offer")
 						.orElse(BazaarTransferWorkflow.CREATE_SELL_OFFER_SLOT);
-					debug(client, "Clicking Create Sell Offer slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + slot + " Create Sell Offer"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverSellOfferState.WAIT_PRICE_SCREEN, client);
 				}
@@ -1499,7 +1508,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_BEST_OFFER_MINUS -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Best Offer -0.1")
 						.orElse(BazaarTransferWorkflow.BEST_OFFER_MINUS_0_1_SLOT);
-					debug(client, "Clicking Best Offer -0.1 slot " + slot + ".");
+					debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + slot + " Best Offer -0.1"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverSellOfferState.WAIT_CONFIRM_SELL_OFFER, client);
 				}
@@ -1513,14 +1522,14 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CONFIRM_SELL_OFFER -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Sell Offer")
 						.orElse(BazaarTransferWorkflow.CONFIRM_SELL_OFFER_SLOT);
-					debug(client, "Clicking Confirm Sell Offer slot " + slot + " for " + quantity + "x " + itemName + ".");
+					debug(client, transferStep("receiver", "sell-offer", quantity, itemName, "click slot " + slot + " Confirm Sell Offer"));
 					actions.clickSlot(client, slot);
 					pendingTransferSellFill = new PendingTransferSellFill(itemName, quantity);
 					if (!modSocketClient.sellOfferReady(quantity)) {
 						fail(client, "could not notify sender that sell offer is ready");
 						return;
 					}
-					done(client, "AutoAuction transfer receiver submitted sell offer for " + quantity + "x " + itemName + ".");
+					done(client, transferStep("receiver", "sell-offer", quantity, itemName, "submitted sell offer; waiting for sender instant buy"));
 				}
 				case DONE, ERROR -> {
 				}
@@ -1535,7 +1544,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info("AutoAuction transfer receiver sell-offer workflow state: {}", next);
+			Autoauction.LOGGER.info(transferState("receiver", "sell-offer", next.name(), quantity, itemName, delayMs));
 		}
 
 		private void debug(Minecraft client, String message) {
@@ -1599,7 +1608,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void start(Minecraft client) {
-			debug(client, "AutoAuction transfer sender workflow started for " + quantity + "x " + itemName + ".");
+			debug(client, transferStep("sender", "instant-sell", quantity, itemName, "start selling into receiver buy order"));
 			transition(SenderInstantSellState.OPEN_BAZAAR, client);
 		}
 
@@ -1633,7 +1642,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
 						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
 						if (itemSlot.isPresent()) {
-							debug(client, "Clicking Bazaar result slot " + itemSlot.get() + " for sender " + itemName + ".");
+							debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + itemSlot.get() + " Bazaar search result"));
 							actions.clickSlot(client, itemSlot.get());
 							transition(SenderInstantSellState.WAIT_ITEM_PAGE, client);
 							return;
@@ -1648,19 +1657,19 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_SELL_INSTANTLY -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Sell Instantly")
 						.orElse(BazaarTransferWorkflow.SELL_INSTANTLY_SLOT);
-					debug(client, "Clicking Sell Instantly slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + slot + " Sell Instantly"));
 					actions.clickSlot(client, slot);
 					transition(SenderInstantSellState.WAIT_WARNING_OR_DONE, client);
 				}
 				case WAIT_WARNING_OR_DONE -> {
 					if (BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client))) {
-						debug(client, "Instant sell warning opened; waiting 6 seconds before confirming.");
+						debug(client, transferStep("sender", "instant-sell", quantity, itemName, "warning screen opened; wait 6000ms before confirm"));
 						transition(SenderInstantSellState.CLICK_WARNING_CONFIRM, client, INSTANT_SELL_WARNING_DELAY_MS);
 						return;
 					}
 					if (System.currentTimeMillis() - stateStartedAt > INSTANT_SELL_WARNING_GRACE_MS) {
 						actions.closeScreen(client);
-						done(client, "AutoAuction transfer sender clicked Sell Instantly for " + quantity + "x " + itemName + ".");
+						done(client, transferStep("sender", "instant-sell", quantity, itemName, "instant sell clicked; waiting for receiver buy-order fill"));
 					}
 				}
 				case CLICK_WARNING_CONFIRM -> {
@@ -1670,10 +1679,10 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					int slot = actions.findHandlerSlotByExactItemName(client, "WARNING")
 						.orElse(BazaarTransferWorkflow.INSTANT_SELL_WARNING_SLOT);
-					debug(client, "Clicking instant sell WARNING slot " + slot + ".");
+					debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + slot + " WARNING confirm"));
 					actions.clickSlot(client, slot);
 					actions.closeScreen(client);
-					done(client, "AutoAuction transfer sender confirmed instant sell for " + quantity + "x " + itemName + ".");
+					done(client, transferStep("sender", "instant-sell", quantity, itemName, "confirmed instant sell; waiting for receiver buy-order fill"));
 				}
 				case DONE, ERROR -> {
 				}
@@ -1688,7 +1697,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info("AutoAuction transfer sender workflow state: {}", next);
+			Autoauction.LOGGER.info(transferState("sender", "instant-sell", next.name(), quantity, itemName, delayMs));
 		}
 
 		private void debug(Minecraft client, String message) {
@@ -1756,7 +1765,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void start(Minecraft client) {
-			debug(client, "AutoAuction transfer sender instant-buy workflow started for " + quantity + "x " + itemName + ".");
+			debug(client, transferStep("sender", "instant-buy", quantity, itemName, "start buying receiver sell offer"));
 			transition(SenderInstantBuyState.OPEN_BAZAAR, client);
 		}
 
@@ -1790,7 +1799,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
 						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
 						if (itemSlot.isPresent()) {
-							debug(client, "Clicking Bazaar result slot " + itemSlot.get() + " for sender instant buy " + itemName + ".");
+							debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + itemSlot.get() + " Bazaar search result"));
 							actions.clickSlot(client, itemSlot.get());
 							transition(SenderInstantBuyState.WAIT_ITEM_PAGE, client);
 							return;
@@ -1805,7 +1814,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_BUY_INSTANTLY -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Buy Instantly")
 						.orElse(BazaarTransferWorkflow.BUY_INSTANTLY_SLOT);
-					debug(client, "Clicking Buy Instantly slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Buy Instantly"));
 					actions.clickSlot(client, slot);
 					transition(SenderInstantBuyState.WAIT_AMOUNT_SCREEN, client);
 				}
@@ -1819,7 +1828,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CUSTOM_AMOUNT -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
 						.orElse(BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
-					debug(client, "Clicking Custom Amount slot " + slot + " for instant buy.");
+					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Custom Amount"));
 					actions.clickSlot(client, slot);
 					transition(SenderInstantBuyState.WAIT_AMOUNT_SIGN, client);
 				}
@@ -1832,7 +1841,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case SUBMIT_AMOUNT -> {
 					String amount = BazaarTransferWorkflow.quantityText(quantity);
-					debug(client, "Submitting transfer instant-buy amount: " + amount + ".");
+					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "type custom amount " + amount));
 					if (!actions.submitSignText(client, amount)) {
 						fail(client, "could not submit custom instant-buy amount");
 						return;
@@ -1849,7 +1858,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_CONFIRM_INSTANT_BUY -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
 						.orElse(BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
-					debug(client, "Clicking Confirm Instant Buy slot " + slot + " for " + quantity + "x " + itemName + ".");
+					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Confirm Instant Buy"));
 					actions.clickSlot(client, slot);
 					actions.closeScreen(client);
 					if (!modSocketClient.sellOfferBought(quantity)) {
@@ -1857,7 +1866,7 @@ public class AutoauctionClient implements ClientModInitializer {
 						return;
 					}
 					finishTransferPurseTracking(client);
-					done(client, "AutoAuction transfer sender bought receiver sell offer for " + quantity + "x " + itemName + ".");
+					done(client, transferStep("sender", "instant-buy", quantity, itemName, "bought receiver sell offer; receiver will claim coins"));
 				}
 				case DONE, ERROR -> {
 				}
@@ -1872,7 +1881,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info("AutoAuction transfer sender instant-buy workflow state: {}", next);
+			Autoauction.LOGGER.info(transferState("sender", "instant-buy", next.name(), quantity, itemName, delayMs));
 		}
 
 		private void debug(Minecraft client, String message) {
@@ -1938,7 +1947,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void start(Minecraft client) {
-			debug(client, "AutoAuction transfer receiver claim workflow started for " + quantity + "x " + itemName + ".");
+			debug(client, transferStep("receiver", "claim-coins", quantity, itemName, "start claiming filled sell offer"));
 			transition(ReceiverClaimSellOfferState.OPEN_BAZAAR, client);
 		}
 
@@ -1977,7 +1986,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				case CLICK_MANAGE_ORDERS -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Manage Orders")
 						.orElse(BazaarTransferWorkflow.MANAGE_ORDERS_SLOT);
-					debug(client, "Clicking Manage Orders slot " + slot + " to claim sell offer.");
+					debug(client, transferStep("receiver", "claim-coins", quantity, itemName, "click slot " + slot + " Manage Orders"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverClaimSellOfferState.WAIT_ORDERS, client);
 				}
@@ -1992,7 +2001,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					int slot = actions.findHandlerSlotByItemName(client, "SELL " + itemName)
 						.or(() -> actions.findHandlerSlotByExactItemName(client, "Claim All Coins"))
 						.orElseThrow(() -> new IllegalStateException("filled sell offer not found for " + itemName));
-					debug(client, "Clicking filled sell offer slot " + slot + " for " + itemName + ".");
+					debug(client, transferStep("receiver", "claim-coins", quantity, itemName, "click slot " + slot + " filled SELL offer / Claim All Coins"));
 					actions.clickSlot(client, slot);
 					transition(ReceiverClaimSellOfferState.CLOSE_AFTER_CLAIM, client, bazaarCloseDelayMs());
 				}
@@ -2009,12 +2018,12 @@ public class AutoauctionClient implements ClientModInitializer {
 							fail(client, "could not notify sender that receiver cycle completed");
 							return;
 						}
-						done(client, "AutoAuction transfer receiver claimed sell offer coins for " + quantity + "x " + itemName + ".");
+						done(client, transferStep("receiver", "claim-coins", quantity, itemName, "coins claimed; sent cycle complete with delta " + formatSignedCoins(delta)));
 						return;
 					}
 					if (preview.isPresent()) {
-						debug(client, "Waiting for receiver purse update after sell-offer claim; current delta="
-							+ formatSignedCoins(preview.get().delta()) + ".");
+						TransferPurseTracker.Summary summary = preview.get();
+						debug(client, TransferDebugMessages.purseWait("receiver", "claim-coins", summary.before(), summary.after(), summary.delta()));
 					}
 					timeout(client, config.screenTimeoutMs(), "receiver purse did not update after claiming sell offer");
 				}
@@ -2031,7 +2040,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info("AutoAuction transfer receiver claim workflow state: {}", next);
+			Autoauction.LOGGER.info(transferState("receiver", "claim-coins", next.name(), quantity, itemName, delayMs));
 		}
 
 		private void debug(Minecraft client, String message) {
