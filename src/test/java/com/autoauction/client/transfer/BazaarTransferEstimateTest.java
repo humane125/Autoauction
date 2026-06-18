@@ -7,24 +7,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BazaarTransferEstimateTest {
 	@Test
-	void estimatesTransferDeltaFromBuyAndSellOrderSpreadAfterTax() {
+	void estimatesTransferDeltaFromHypixelQuickStatusAfterTax() {
 		BazaarTransferEstimate estimate = BazaarTransferEstimate.fromPrices(
-			"ENCHANTED_DIAMOND",
-			128,
-			200_000_000L,
-			1_000,
-			1_300
+			"MAGMA_CREAM_DISTILLATE",
+			16,
+			3_500_000L,
+			69_993.6,
+			6_353.2
 		).orElseThrow();
 
-		assertEquals("ENCHANTED_DIAMOND", estimate.productId());
-		assertEquals(128, estimate.quantity());
-		assertEquals(36_295L, estimate.estimatedDeltaPerCycle());
-		assertEquals(5_511, estimate.estimatedCycles());
+		assertEquals("MAGMA_CREAM_DISTILLATE", estimate.productId());
+		assertEquals(16, estimate.quantity());
+		assertEquals(1_004_245L, estimate.estimatedDeltaPerCycle());
+		assertEquals(4, estimate.estimatedCycles());
 	}
 
 	@Test
 	void skipsEstimateWhenSpreadCannotTransferCoins() {
-		assertTrue(BazaarTransferEstimate.fromPrices("ENCHANTED_DIAMOND", 128, 200_000_000L, 1_300, 1_000).isEmpty());
+		assertTrue(BazaarTransferEstimate.fromPrices("ENCHANTED_DIAMOND", 128, 200_000_000L, 1_000, 1_300).isEmpty());
 	}
 
 	@Test
