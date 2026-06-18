@@ -13,6 +13,9 @@ public final class BazaarTransferWorkflow {
 	public static final int CREATE_SELL_OFFER_SLOT = 16;
 	public static final int BEST_OFFER_MINUS_0_1_SLOT = 12;
 	public static final int CONFIRM_SELL_OFFER_SLOT = 13;
+	public static final int BUY_INSTANTLY_SLOT = 10;
+	public static final int CONFIRM_INSTANT_BUY_SLOT = 13;
+	public static final int CLAIM_ALL_COINS_SLOT = 32;
 
 	private BazaarTransferWorkflow() {
 	}
@@ -48,6 +51,16 @@ public final class BazaarTransferWorkflow {
 		return normalized(title).equals("confirm");
 	}
 
+	public static boolean isInstantBuyAmountScreen(String title) {
+		String cleanTitle = normalized(title);
+		return !cleanTitle.equals("confirm instant buy")
+			&& (cleanTitle.contains("instant buy") || cleanTitle.contains("➜ instan") || cleanTitle.contains("âžœ instan"));
+	}
+
+	public static boolean isConfirmInstantBuyScreen(String title) {
+		return normalized(title).equals("confirm instant buy");
+	}
+
 	public static boolean isOrdersScreen(String title) {
 		return normalized(title).equals("your bazaar orders");
 	}
@@ -71,6 +84,17 @@ public final class BazaarTransferWorkflow {
 		return !comparableItem.isBlank()
 			&& comparableClean.contains("bazaar")
 			&& comparableClean.contains("yourbuyorderfor")
+			&& comparableClean.contains(comparableItem)
+			&& comparableClean.contains("wasfilled");
+	}
+
+	public static boolean isSellOfferFilledMessage(String message, String itemName) {
+		String clean = cleanChatMessage(message);
+		String comparableClean = comparable(clean);
+		String comparableItem = comparable(itemName);
+		return !comparableItem.isBlank()
+			&& comparableClean.contains("bazaar")
+			&& comparableClean.contains("yoursellofferfor")
 			&& comparableClean.contains(comparableItem)
 			&& comparableClean.contains("wasfilled");
 	}

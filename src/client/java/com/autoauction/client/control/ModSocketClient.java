@@ -229,6 +229,14 @@ public final class ModSocketClient implements AutoCloseable {
 			transferHandler.onBuyOrderReady(transferRun(message));
 			return;
 		}
+		if (Objects.equals(type, "transfer_sell_offer_ready")) {
+			transferHandler.onSellOfferReady(transferRun(message));
+			return;
+		}
+		if (Objects.equals(type, "transfer_sell_offer_bought")) {
+			transferHandler.onSellOfferBought(transferRun(message));
+			return;
+		}
 		if (Objects.equals(type, "transfer_error")) {
 			transferHandler.onError(stringProperty(message, "code", "unknown"), stringProperty(message, "message", "Transfer failed"));
 		}
@@ -346,6 +354,20 @@ public final class ModSocketClient implements AutoCloseable {
 	public synchronized boolean buyOrderReady(int quantity) {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "transfer_buy_order_ready");
+		message.addProperty("quantity", Math.max(1, quantity));
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean sellOfferReady(int quantity) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_sell_offer_ready");
+		message.addProperty("quantity", Math.max(1, quantity));
+		return sendTransferMessage(message);
+	}
+
+	public synchronized boolean sellOfferBought(int quantity) {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_sell_offer_bought");
 		message.addProperty("quantity", Math.max(1, quantity));
 		return sendTransferMessage(message);
 	}
@@ -511,6 +533,12 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 
 		default void onBuyOrderReady(TransferRun run) {
+		}
+
+		default void onSellOfferReady(TransferRun run) {
+		}
+
+		default void onSellOfferBought(TransferRun run) {
 		}
 
 		default void onError(String code, String message) {

@@ -7,6 +7,8 @@ import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.config.AutoAuctionConfigStore;
 import com.autoauction.client.control.ModSocketClient;
+import com.autoauction.client.debug.SkyBlockStatus;
+import com.autoauction.client.debug.StatusDumpFormatter;
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.domain.ArmorStatusFormatter;
@@ -20,6 +22,7 @@ import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
 import com.autoauction.client.transfer.TransferController;
+import com.autoauction.client.transfer.TransferPurseTracker;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -32,20 +35,29 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.PlayerScoreEntry;
+import net.minecraft.world.scores.PlayerTeam;
+import net.minecraft.world.scores.Scoreboard;
 import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
@@ -67,6 +79,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private AuctionApiClient apiClient;
 	private ModSocketClient modSocketClient;
 	private TransferController transferController;
+	private final TransferPurseTracker transferPurseTracker = new TransferPurseTracker();
 	private DiscordNotifier notifier;
 	private AltManagerHandoffClient handoffClient;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
@@ -79,7 +92,10 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ReceiverBuyOrderWorkflow receiverBuyOrderWorkflow;
 	private ReceiverSellOfferWorkflow receiverSellOfferWorkflow;
 	private SenderInstantSellWorkflow senderInstantSellWorkflow;
+	private SenderInstantBuyWorkflow senderInstantBuyWorkflow;
+	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
 	private PendingTransferFill pendingTransferFill;
+	private PendingTransferSellFill pendingTransferSellFill;
 	private PendingHandoff pendingHandoff;
 
 	@Override
@@ -122,6 +138,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (senderInstantSellWorkflow != null) {
 					senderInstantSellWorkflow.tick(client);
+				}
+				if (senderInstantBuyWorkflow != null) {
+					senderInstantBuyWorkflow.tick(client);
+				}
+				if (receiverClaimSellOfferWorkflow != null) {
+					receiverClaimSellOfferWorkflow.tick(client);
 				}
 				tickCounter++;
 				if (tickCounter % 10 == 0) {
@@ -384,6 +406,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				handleCookieBuffRequired();
 			}
 			handleTransferBuyOrderFilled(text);
+			handleTransferSellOfferFilled(text);
 		});
 	}
 
@@ -399,6 +422,25 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 			receiverSellOfferWorkflow = new ReceiverSellOfferWorkflow(pending.itemName(), pending.quantity());
 			receiverSellOfferWorkflow.start(Minecraft.getInstance());
+		});
+	}
+
+	private void handleTransferSellOfferFilled(String message) {
+		PendingTransferSellFill pending = pendingTransferSellFill;
+		if (pending == null || !BazaarTransferWorkflow.isSellOfferFilledMessage(message, pending.itemName())) {
+			return;
+		}
+		pendingTransferSellFill = null;
+		startReceiverClaimSellOfferWorkflow(pending.itemName(), pending.quantity());
+	}
+
+	private void startReceiverClaimSellOfferWorkflow(String itemName, int quantity) {
+		Minecraft.getInstance().execute(() -> {
+			if (receiverClaimSellOfferWorkflow != null) {
+				return;
+			}
+			receiverClaimSellOfferWorkflow = new ReceiverClaimSellOfferWorkflow(itemName, quantity);
+			receiverClaimSellOfferWorkflow.start(Minecraft.getInstance());
 		});
 	}
 
@@ -451,7 +493,11 @@ public class AutoauctionClient implements ClientModInitializer {
 				receiverBuyOrderWorkflow = null;
 				receiverSellOfferWorkflow = null;
 				senderInstantSellWorkflow = null;
+				senderInstantBuyWorkflow = null;
+				receiverClaimSellOfferWorkflow = null;
 				pendingTransferFill = null;
+				pendingTransferSellFill = null;
+				transferPurseTracker.clear();
 			}
 
 			@Override
@@ -459,6 +505,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				TransferController.Session session = toTransferSession(run.session());
 				sendTransferFeedback(transferController.incomingRun(run.quantity()));
 				Minecraft.getInstance().execute(() -> {
+					startTransferPurseTracking("receiver", Minecraft.getInstance());
 					receiverBuyOrderWorkflow = new ReceiverBuyOrderWorkflow(session.itemName(), run.quantity());
 					receiverBuyOrderWorkflow.start(Minecraft.getInstance());
 				});
@@ -480,12 +527,34 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 
 			@Override
+			public void onSellOfferReady(ModSocketClient.TransferRun run) {
+				TransferController.Session session = toTransferSession(run.session());
+				sendTransferFeedback("AutoAuction transfer sell offer ready: buying " + run.quantity() + "x " + session.itemName() + ".");
+				Minecraft.getInstance().execute(() -> {
+					senderInstantBuyWorkflow = new SenderInstantBuyWorkflow(session.itemName(), run.quantity());
+					senderInstantBuyWorkflow.start(Minecraft.getInstance());
+				});
+			}
+
+			@Override
+			public void onSellOfferBought(ModSocketClient.TransferRun run) {
+				TransferController.Session session = toTransferSession(run.session());
+				sendTransferFeedback("AutoAuction transfer sell offer bought: claiming coins for " + run.quantity() + "x " + session.itemName() + ".");
+				pendingTransferSellFill = null;
+				startReceiverClaimSellOfferWorkflow(session.itemName(), run.quantity());
+			}
+
+			@Override
 			public void onError(String code, String message) {
 				sendTransferFeedback(transferController.error(code, message));
 				receiverBuyOrderWorkflow = null;
 				receiverSellOfferWorkflow = null;
 				senderInstantSellWorkflow = null;
+				senderInstantBuyWorkflow = null;
+				receiverClaimSellOfferWorkflow = null;
 				pendingTransferFill = null;
+				pendingTransferSellFill = null;
+				transferPurseTracker.clear();
 			}
 		};
 	}
@@ -556,6 +625,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendFeedback(context.getSource(), statusMessage());
 				return 1;
 			}))
+			.then(literal("island").executes(context -> {
+				sendFeedback(context.getSource(), currentIslandMessage(context.getSource().getClient()));
+				return 1;
+			}))
 			.then(literal("armor").executes(context -> {
 				EnumMap<ArmorPiece, ArmorSnapshot> armor = actions.readEquippedFinalDestinationArmor(context.getSource().getClient());
 				for (String line : ArmorStatusFormatter.format(armor, config.killThreshold())) {
@@ -590,6 +663,11 @@ public class AutoauctionClient implements ClientModInitializer {
 			.then(literal("dumpslots").executes(context -> {
 				int slotCount = dumpOpenSlots(context.getSource().getClient());
 				sendFeedback(context.getSource(), "AutoAuction dumped " + slotCount + " slots to latest.log.");
+				return 1;
+			}))
+			.then(literal("dumpstatus").executes(context -> {
+				DumpCounts counts = dumpScoreboardAndTabList(context.getSource().getClient());
+				sendFeedback(context.getSource(), "AutoAuction dumped scoreboard=" + counts.scoreboardLines() + " tablist=" + counts.tabListLines() + " to latest.log.");
 				return 1;
 			}))
 			.then(literal("transfer")
@@ -640,6 +718,7 @@ public class AutoauctionClient implements ClientModInitializer {
 						sendFeedback(context.getSource(), "AutoAuction transfer run failed: mod socket is not connected yet.");
 						return 0;
 					}
+					startTransferPurseTracking("sender", context.getSource().getClient());
 					sendFeedback(context.getSource(), "AutoAuction transfer run requested for " + quantity + "x " + itemName + ".");
 					return 1;
 				}))
@@ -681,6 +760,137 @@ public class AutoauctionClient implements ClientModInitializer {
 			client.player.sendSystemMessage(Component.literal("AutoAuction dumped " + slotCount + " slots to latest.log."));
 		}
 		return slotCount;
+	}
+
+	private DumpCounts dumpScoreboardAndTabList(Minecraft client) {
+		List<String> scoreboardLines = readScoreboardLines(client);
+		List<String> tabListLines = readTabListLines(client);
+		for (String line : StatusDumpFormatter.format(scoreboardLines, tabListLines)) {
+			Autoauction.LOGGER.info(line);
+		}
+		SkyBlockStatus status = SkyBlockStatus.fromLines(scoreboardLines, tabListLines);
+		Autoauction.LOGGER.info(
+			"AutoAuction parsed status: area={} island={} purse={}",
+			status.area().orElse("unknown"),
+			status.currentIsland().map(SkyBlockStatus.Island::displayName).orElse("unknown"),
+			formatOptionalPurse(status.purse())
+		);
+		return new DumpCounts(scoreboardLines.size(), tabListLines.size());
+	}
+
+	private SkyBlockStatus currentSkyBlockStatus(Minecraft client) {
+		return SkyBlockStatus.fromLines(readScoreboardLines(client), readTabListLines(client));
+	}
+
+	private String currentIslandMessage(Minecraft client) {
+		SkyBlockStatus status = currentSkyBlockStatus(client);
+		return "AutoAuction current island: " + status.currentIsland().map(SkyBlockStatus.Island::displayName).orElse("unknown")
+			+ " (Area: " + status.area().orElse("unknown") + ")"
+			+ ", purse=" + formatOptionalPurse(status.purse()) + ".";
+	}
+
+	private OptionalLong currentPurse(Minecraft client) {
+		return currentSkyBlockStatus(client).purse();
+	}
+
+	private void startTransferPurseTracking(String role, Minecraft client) {
+		SkyBlockStatus status = currentSkyBlockStatus(client);
+		transferPurseTracker.start(role, status.purse());
+		Autoauction.LOGGER.info(
+			"AutoAuction transfer {} purse before: {} area={} island={}",
+			role,
+			formatOptionalPurse(status.purse()),
+			status.area().orElse("unknown"),
+			status.currentIsland().map(SkyBlockStatus.Island::displayName).orElse("unknown")
+		);
+	}
+
+	private void finishTransferPurseTracking(Minecraft client) {
+		transferPurseTracker.finish(currentPurse(client)).ifPresent(summary -> {
+			String message = "AutoAuction transfer " + summary.role()
+				+ " purse before=" + formatCoins(summary.before())
+				+ " after=" + formatCoins(summary.after())
+				+ " delta=" + formatSignedCoins(summary.delta()) + ".";
+			Autoauction.LOGGER.info(message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal(message));
+			}
+		});
+	}
+
+	private String formatOptionalPurse(OptionalLong purse) {
+		return purse.isPresent() ? formatCoins(purse.getAsLong()) : "unknown";
+	}
+
+	private String formatCoins(long coins) {
+		return String.format("%,d", coins);
+	}
+
+	private String formatSignedCoins(long coins) {
+		return (coins >= 0 ? "+" : "") + formatCoins(coins);
+	}
+
+	private List<String> readScoreboardLines(Minecraft client) {
+		ClientPacketListener connection = client.getConnection();
+		Scoreboard scoreboard = connection != null ? connection.scoreboard() : null;
+		if (scoreboard == null && client.level != null) {
+			scoreboard = client.level.getScoreboard();
+		}
+		if (scoreboard == null) {
+			return List.of();
+		}
+		Scoreboard selectedScoreboard = scoreboard;
+
+		Objective objective = selectedScoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
+		if (objective == null) {
+			return List.of();
+		}
+
+		List<String> lines = new ArrayList<>();
+		lines.add("title=" + objective.getDisplayName().getString());
+		selectedScoreboard.listPlayerScores(objective).stream()
+			.filter(entry -> !entry.isHidden())
+			.sorted(Comparator.comparingInt(PlayerScoreEntry::value).reversed())
+			.map(entry -> scoreboardLine(selectedScoreboard, entry))
+			.filter(line -> !line.isBlank())
+			.forEach(lines::add);
+		return lines;
+	}
+
+	private String scoreboardLine(Scoreboard scoreboard, PlayerScoreEntry entry) {
+		Component display = entry.display();
+		String text = display == null ? "" : display.getString();
+		if (!text.isBlank()) {
+			return text;
+		}
+
+		PlayerTeam team = scoreboard.getPlayersTeam(entry.owner());
+		if (team != null) {
+			return PlayerTeam.formatNameForTeam(team, Component.literal(entry.owner())).getString();
+		}
+		return entry.owner();
+	}
+
+	private List<String> readTabListLines(Minecraft client) {
+		ClientPacketListener connection = client.getConnection();
+		if (connection == null) {
+			return List.of();
+		}
+
+		return connection.getListedOnlinePlayers().stream()
+			.sorted(Comparator.comparingInt(PlayerInfo::getTabListOrder)
+				.thenComparing(info -> info.getProfile().name(), String.CASE_INSENSITIVE_ORDER))
+			.map(this::tabListLine)
+			.filter(line -> !line.isBlank())
+			.toList();
+	}
+
+	private String tabListLine(PlayerInfo info) {
+		Component displayName = info.getTabListDisplayName();
+		if (displayName != null) {
+			return displayName.getString();
+		}
+		return info.getProfile().name();
 	}
 
 	private String statusMessage() {
@@ -826,6 +1036,12 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	record PendingTransferFill(String itemName, int quantity) {
+	}
+
+	record PendingTransferSellFill(String itemName, int quantity) {
+	}
+
+	record DumpCounts(int scoreboardLines, int tabListLines) {
 	}
 
 	private enum ReceiverBuyOrderState {
@@ -1159,6 +1375,11 @@ public class AutoauctionClient implements ClientModInitializer {
 						.orElse(BazaarTransferWorkflow.CONFIRM_SELL_OFFER_SLOT);
 					debug(client, "Clicking Confirm Sell Offer slot " + slot + " for " + quantity + "x " + itemName + ".");
 					actions.clickSlot(client, slot);
+					pendingTransferSellFill = new PendingTransferSellFill(itemName, quantity);
+					if (!modSocketClient.sellOfferReady(quantity)) {
+						fail(client, "could not notify sender that sell offer is ready");
+						return;
+					}
 					done(client, "AutoAuction transfer receiver submitted sell offer for " + quantity + "x " + itemName + ".");
 				}
 				case DONE, ERROR -> {
@@ -1351,6 +1572,313 @@ public class AutoauctionClient implements ClientModInitializer {
 				client.player.sendSystemMessage(Component.literal("AutoAuction transfer sender failed: " + message));
 			}
 			notifyIssueAsync("transfer sender workflow failed: " + message);
+		}
+
+		private String screenTitle(Minecraft client) {
+			return client.screen == null ? "" : client.screen.getTitle().getString();
+		}
+	}
+
+	private enum SenderInstantBuyState {
+		OPEN_BAZAAR,
+		WAIT_ITEM_PAGE,
+		CLICK_BUY_INSTANTLY,
+		WAIT_AMOUNT_SCREEN,
+		CLICK_CUSTOM_AMOUNT,
+		WAIT_AMOUNT_SIGN,
+		SUBMIT_AMOUNT,
+		WAIT_CONFIRM_INSTANT_BUY,
+		CLICK_CONFIRM_INSTANT_BUY,
+		DONE,
+		ERROR
+	}
+
+	private final class SenderInstantBuyWorkflow {
+		private final String itemName;
+		private final int quantity;
+		private SenderInstantBuyState state = SenderInstantBuyState.OPEN_BAZAAR;
+		private long nextActionAt;
+		private long stateStartedAt;
+
+		private SenderInstantBuyWorkflow(String itemName, int quantity) {
+			this.itemName = itemName;
+			this.quantity = Math.max(1, quantity);
+		}
+
+		private void start(Minecraft client) {
+			debug(client, "AutoAuction transfer sender instant-buy workflow started for " + quantity + "x " + itemName + ".");
+			transition(SenderInstantBuyState.OPEN_BAZAAR, client);
+		}
+
+		private void tick(Minecraft client) {
+			if (state == SenderInstantBuyState.DONE || state == SenderInstantBuyState.ERROR || System.currentTimeMillis() < nextActionAt) {
+				return;
+			}
+			try {
+				runState(client);
+			} catch (Exception e) {
+				fail(client, e.getMessage());
+			}
+		}
+
+		private void runState(Minecraft client) {
+			switch (state) {
+				case OPEN_BAZAAR -> {
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(SenderInstantBuyState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_ITEM_PAGE -> {
+					String title = screenTitle(client);
+					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
+						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
+						if (itemSlot.isPresent()) {
+							debug(client, "Clicking Bazaar result slot " + itemSlot.get() + " for sender instant buy " + itemName + ".");
+							actions.clickSlot(client, itemSlot.get());
+							transition(SenderInstantBuyState.WAIT_ITEM_PAGE, client);
+							return;
+						}
+					}
+					if (BazaarTransferWorkflow.isItemPage(title, itemName)) {
+						transition(SenderInstantBuyState.CLICK_BUY_INSTANTLY, client);
+						return;
+					}
+					timeout(client, config.screenTimeoutMs(), "Bazaar item page did not open for sender instant buy " + itemName);
+				}
+				case CLICK_BUY_INSTANTLY -> {
+					int slot = actions.findHandlerSlotByExactItemName(client, "Buy Instantly")
+						.orElse(BazaarTransferWorkflow.BUY_INSTANTLY_SLOT);
+					debug(client, "Clicking Buy Instantly slot " + slot + " for " + itemName + ".");
+					actions.clickSlot(client, slot);
+					transition(SenderInstantBuyState.WAIT_AMOUNT_SCREEN, client);
+				}
+				case WAIT_AMOUNT_SCREEN -> {
+					if (!BazaarTransferWorkflow.isInstantBuyAmountScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "instant-buy amount screen did not open");
+						return;
+					}
+					transition(SenderInstantBuyState.CLICK_CUSTOM_AMOUNT, client);
+				}
+				case CLICK_CUSTOM_AMOUNT -> {
+					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
+						.orElse(BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
+					debug(client, "Clicking Custom Amount slot " + slot + " for instant buy.");
+					actions.clickSlot(client, slot);
+					transition(SenderInstantBuyState.WAIT_AMOUNT_SIGN, client);
+				}
+				case WAIT_AMOUNT_SIGN -> {
+					if (!BazaarTransferWorkflow.isSignScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "instant-buy custom amount sign did not open");
+						return;
+					}
+					transition(SenderInstantBuyState.SUBMIT_AMOUNT, client);
+				}
+				case SUBMIT_AMOUNT -> {
+					String amount = BazaarTransferWorkflow.quantityText(quantity);
+					debug(client, "Submitting transfer instant-buy amount: " + amount + ".");
+					if (!actions.submitSignText(client, amount)) {
+						fail(client, "could not submit custom instant-buy amount");
+						return;
+					}
+					transition(SenderInstantBuyState.WAIT_CONFIRM_INSTANT_BUY, client);
+				}
+				case WAIT_CONFIRM_INSTANT_BUY -> {
+					if (!BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "Confirm Instant Buy screen did not open");
+						return;
+					}
+					transition(SenderInstantBuyState.CLICK_CONFIRM_INSTANT_BUY, client);
+				}
+				case CLICK_CONFIRM_INSTANT_BUY -> {
+					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
+						.orElse(BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
+					debug(client, "Clicking Confirm Instant Buy slot " + slot + " for " + quantity + "x " + itemName + ".");
+					actions.clickSlot(client, slot);
+					actions.closeScreen(client);
+					if (!modSocketClient.sellOfferBought(quantity)) {
+						fail(client, "could not notify receiver that sell offer was bought");
+						return;
+					}
+					finishTransferPurseTracking(client);
+					done(client, "AutoAuction transfer sender bought receiver sell offer for " + quantity + "x " + itemName + ".");
+				}
+				case DONE, ERROR -> {
+				}
+			}
+		}
+
+		private void transition(SenderInstantBuyState next, Minecraft client) {
+			transition(next, client, config.clickDelayMs());
+		}
+
+		private void transition(SenderInstantBuyState next, Minecraft client, int delayMs) {
+			state = next;
+			stateStartedAt = System.currentTimeMillis();
+			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
+			Autoauction.LOGGER.info("AutoAuction transfer sender instant-buy workflow state: {}", next);
+		}
+
+		private void debug(Minecraft client, String message) {
+			Autoauction.LOGGER.info(message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal(message));
+			}
+		}
+
+		private void timeout(Minecraft client, int timeoutMs, String message) {
+			if (System.currentTimeMillis() - stateStartedAt > timeoutMs) {
+				fail(client, message);
+			}
+		}
+
+		private void done(Minecraft client, String message) {
+			state = SenderInstantBuyState.DONE;
+			senderInstantBuyWorkflow = null;
+			Autoauction.LOGGER.info(message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal(message));
+			}
+		}
+
+		private void fail(Minecraft client, String message) {
+			state = SenderInstantBuyState.ERROR;
+			senderInstantBuyWorkflow = null;
+			Autoauction.LOGGER.error("AutoAuction transfer sender instant-buy workflow failed: {}", message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal("AutoAuction transfer sender instant buy failed: " + message));
+			}
+			notifyIssueAsync("transfer sender instant-buy workflow failed: " + message);
+		}
+
+		private String screenTitle(Minecraft client) {
+			return client.screen == null ? "" : client.screen.getTitle().getString();
+		}
+	}
+
+	private enum ReceiverClaimSellOfferState {
+		OPEN_BAZAAR,
+		WAIT_BAZAAR,
+		CLICK_MANAGE_ORDERS,
+		WAIT_ORDERS,
+		CLICK_FILLED_SELL_OFFER,
+		CLOSE_AFTER_CLAIM,
+		DONE,
+		ERROR
+	}
+
+	private final class ReceiverClaimSellOfferWorkflow {
+		private final String itemName;
+		private final int quantity;
+		private ReceiverClaimSellOfferState state = ReceiverClaimSellOfferState.OPEN_BAZAAR;
+		private long nextActionAt;
+		private long stateStartedAt;
+
+		private ReceiverClaimSellOfferWorkflow(String itemName, int quantity) {
+			this.itemName = itemName;
+			this.quantity = Math.max(1, quantity);
+		}
+
+		private void start(Minecraft client) {
+			debug(client, "AutoAuction transfer receiver claim workflow started for " + quantity + "x " + itemName + ".");
+			transition(ReceiverClaimSellOfferState.OPEN_BAZAAR, client);
+		}
+
+		private void tick(Minecraft client) {
+			if (state == ReceiverClaimSellOfferState.DONE || state == ReceiverClaimSellOfferState.ERROR || System.currentTimeMillis() < nextActionAt) {
+				return;
+			}
+			try {
+				runState(client);
+			} catch (Exception e) {
+				fail(client, e.getMessage());
+			}
+		}
+
+		private void runState(Minecraft client) {
+			switch (state) {
+				case OPEN_BAZAAR -> {
+					actions.sendChatCommand(client, "/bz");
+					transition(ReceiverClaimSellOfferState.WAIT_BAZAAR, client);
+				}
+				case WAIT_BAZAAR -> {
+					if (!BazaarTransferWorkflow.isBazaarResultScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "Bazaar screen did not open before claiming sell offer");
+						return;
+					}
+					transition(ReceiverClaimSellOfferState.CLICK_MANAGE_ORDERS, client);
+				}
+				case CLICK_MANAGE_ORDERS -> {
+					int slot = actions.findHandlerSlotByExactItemName(client, "Manage Orders")
+						.orElse(BazaarTransferWorkflow.MANAGE_ORDERS_SLOT);
+					debug(client, "Clicking Manage Orders slot " + slot + " to claim sell offer.");
+					actions.clickSlot(client, slot);
+					transition(ReceiverClaimSellOfferState.WAIT_ORDERS, client);
+				}
+				case WAIT_ORDERS -> {
+					if (!BazaarTransferWorkflow.isOrdersScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "Bazaar orders screen did not open before claiming sell offer");
+						return;
+					}
+					transition(ReceiverClaimSellOfferState.CLICK_FILLED_SELL_OFFER, client);
+				}
+				case CLICK_FILLED_SELL_OFFER -> {
+					int slot = actions.findHandlerSlotByItemName(client, "SELL " + itemName)
+						.or(() -> actions.findHandlerSlotByExactItemName(client, "Claim All Coins"))
+						.orElseThrow(() -> new IllegalStateException("filled sell offer not found for " + itemName));
+					debug(client, "Clicking filled sell offer slot " + slot + " for " + itemName + ".");
+					actions.clickSlot(client, slot);
+					transition(ReceiverClaimSellOfferState.CLOSE_AFTER_CLAIM, client, bazaarCloseDelayMs());
+				}
+				case CLOSE_AFTER_CLAIM -> {
+					actions.closeScreen(client);
+					finishTransferPurseTracking(client);
+					done(client, "AutoAuction transfer receiver claimed sell offer coins for " + quantity + "x " + itemName + ".");
+				}
+				case DONE, ERROR -> {
+				}
+			}
+		}
+
+		private void transition(ReceiverClaimSellOfferState next, Minecraft client) {
+			transition(next, client, config.clickDelayMs());
+		}
+
+		private void transition(ReceiverClaimSellOfferState next, Minecraft client, int delayMs) {
+			state = next;
+			stateStartedAt = System.currentTimeMillis();
+			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
+			Autoauction.LOGGER.info("AutoAuction transfer receiver claim workflow state: {}", next);
+		}
+
+		private void debug(Minecraft client, String message) {
+			Autoauction.LOGGER.info(message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal(message));
+			}
+		}
+
+		private void timeout(Minecraft client, int timeoutMs, String message) {
+			if (System.currentTimeMillis() - stateStartedAt > timeoutMs) {
+				fail(client, message);
+			}
+		}
+
+		private void done(Minecraft client, String message) {
+			state = ReceiverClaimSellOfferState.DONE;
+			receiverClaimSellOfferWorkflow = null;
+			Autoauction.LOGGER.info(message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal(message));
+			}
+		}
+
+		private void fail(Minecraft client, String message) {
+			state = ReceiverClaimSellOfferState.ERROR;
+			receiverClaimSellOfferWorkflow = null;
+			Autoauction.LOGGER.error("AutoAuction transfer receiver claim workflow failed: {}", message);
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal("AutoAuction transfer receiver claim failed: " + message));
+			}
+			notifyIssueAsync("transfer receiver claim workflow failed: " + message);
 		}
 
 		private String screenTitle(Minecraft client) {

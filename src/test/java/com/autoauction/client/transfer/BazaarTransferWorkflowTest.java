@@ -19,6 +19,9 @@ class BazaarTransferWorkflowTest {
 		assertEquals(16, BazaarTransferWorkflow.CREATE_SELL_OFFER_SLOT);
 		assertEquals(12, BazaarTransferWorkflow.BEST_OFFER_MINUS_0_1_SLOT);
 		assertEquals(13, BazaarTransferWorkflow.CONFIRM_SELL_OFFER_SLOT);
+		assertEquals(10, BazaarTransferWorkflow.BUY_INSTANTLY_SLOT);
+		assertEquals(13, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
+		assertEquals(32, BazaarTransferWorkflow.CLAIM_ALL_COINS_SLOT);
 	}
 
 	@Test
@@ -33,6 +36,9 @@ class BazaarTransferWorkflowTest {
 		assertTrue(BazaarTransferWorkflow.isBuyOrderPriceScreen("How much do you want to pay?"));
 		assertTrue(BazaarTransferWorkflow.isConfirmBuyOrderScreen("Confirm Buy Order"));
 		assertTrue(BazaarTransferWorkflow.isInstantSellWarningScreen("Confirm"));
+		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instant Buy"));
+		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instan"));
+		assertTrue(BazaarTransferWorkflow.isConfirmInstantBuyScreen("Confirm Instant Buy"));
 		assertTrue(BazaarTransferWorkflow.isOrdersScreen("Your Bazaar Orders"));
 		assertTrue(BazaarTransferWorkflow.isSellOfferPriceScreen("At what price are you selling?"));
 		assertTrue(BazaarTransferWorkflow.isConfirmSellOfferScreen("Confirm Sell Offer"));
@@ -46,9 +52,21 @@ class BazaarTransferWorkflowTest {
 		assertFalse(BazaarTransferWorkflow.isBuyOrderPriceScreen("How many do you want?"));
 		assertFalse(BazaarTransferWorkflow.isConfirmBuyOrderScreen("Cancel Buy Order"));
 		assertFalse(BazaarTransferWorkflow.isInstantSellWarningScreen("Confirm Buy Order"));
+		assertFalse(BazaarTransferWorkflow.isInstantBuyAmountScreen("Confirm Instant Buy"));
+		assertFalse(BazaarTransferWorkflow.isConfirmInstantBuyScreen("Confirm Buy Order"));
 		assertFalse(BazaarTransferWorkflow.isOrdersScreen("Confirm Sell Offer"));
 		assertFalse(BazaarTransferWorkflow.isSellOfferPriceScreen("How much do you want to pay?"));
 		assertFalse(BazaarTransferWorkflow.isConfirmSellOfferScreen("Confirm Buy Order"));
+	}
+
+	@Test
+	void stripsFormattingAndDetectsFilledSellOfferChat() {
+		String message = "\u00a76[Bazaar] \u00a7eYour \u00a76Sell Offer \u00a7efor \u00a7a1\u00a77x \u00a79Magma Cream Distillate \u00a7ewas filled!";
+
+		assertEquals("[Bazaar] Your Sell Offer for 1x Magma Cream Distillate was filled!", BazaarTransferWorkflow.cleanChatMessage(message));
+		assertTrue(BazaarTransferWorkflow.isSellOfferFilledMessage(message, "Magma Cream Distillate"));
+		assertTrue(BazaarTransferWorkflow.isSellOfferFilledMessage(message, "magma cream distillate"));
+		assertFalse(BazaarTransferWorkflow.isSellOfferFilledMessage(message, "Blaze Rod Distillate"));
 	}
 
 	@Test

@@ -245,6 +245,8 @@ class ModSocketClientTest {
 		client.cancelTransfer();
 		client.runTransfer(128);
 		client.buyOrderReady(128);
+		client.sellOfferReady(128);
+		client.sellOfferBought(128);
 
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_list\"")));
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_invite\"")
@@ -258,6 +260,10 @@ class ModSocketClientTest {
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_run\"")
 			&& message.contains("\"quantity\":128")));
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_buy_order_ready\"")
+			&& message.contains("\"quantity\":128")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_sell_offer_ready\"")
+			&& message.contains("\"quantity\":128")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_sell_offer_bought\"")
 			&& message.contains("\"quantity\":128")));
 		client.close();
 	}
@@ -278,6 +284,8 @@ class ModSocketClientTest {
 		assertFalse(client.cancelTransfer());
 		assertFalse(client.runTransfer(128));
 		assertFalse(client.buyOrderReady(128));
+		assertFalse(client.sellOfferReady(128));
+		assertFalse(client.sellOfferBought(128));
 		assertEquals(1, transport.connection.sentMessages.size());
 		client.close();
 	}
@@ -334,6 +342,16 @@ class ModSocketClientTest {
 			}
 
 			@Override
+			public void onSellOfferReady(ModSocketClient.TransferRun run) {
+				events.add("sell-offer-ready:" + run.session().itemName() + ":" + run.quantity());
+			}
+
+			@Override
+			public void onSellOfferBought(ModSocketClient.TransferRun run) {
+				events.add("sell-offer-bought:" + run.session().itemName() + ":" + run.quantity());
+			}
+
+			@Override
 			public void onError(String code, String message) {
 				events.add("error:" + code + ":" + message);
 			}
@@ -351,6 +369,8 @@ class ModSocketClientTest {
 		transport.message("{\"type\":\"transfer_run\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
 		transport.message("{\"type\":\"transfer_run_sent\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
 		transport.message("{\"type\":\"transfer_buy_order_ready\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_sell_offer_ready\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
+		transport.message("{\"type\":\"transfer_sell_offer_bought\",\"quantity\":128,\"session\":{\"id\":\"s1\",\"senderUsername\":\"SenderPlayer\",\"receiverUsername\":\"ReceiverPlayer\",\"itemName\":\"ENCHANTED DIAMOND\"}}");
 		transport.message("{\"type\":\"transfer_error\",\"code\":\"target_offline\",\"message\":\"ReceiverPlayer is not connected\"}");
 
 		assertEquals(List.of(
@@ -363,6 +383,8 @@ class ModSocketClientTest {
 			"run:ENCHANTED DIAMOND:128",
 			"run-sent:ReceiverPlayer:128",
 			"buy-order-ready:ENCHANTED DIAMOND:128",
+			"sell-offer-ready:ENCHANTED DIAMOND:128",
+			"sell-offer-bought:ENCHANTED DIAMOND:128",
 			"error:target_offline:ReceiverPlayer is not connected"
 		), events);
 		client.close();
