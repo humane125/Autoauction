@@ -429,6 +429,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 			handleTransferBuyOrderFilled(text);
 			handleTransferSellOfferFilled(text);
+			handleTransferInstantBuyComplete(text);
 		});
 	}
 
@@ -454,6 +455,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		pendingTransferSellFill = null;
 		startReceiverClaimSellOfferWorkflow(pending.itemName(), pending.quantity());
+	}
+
+	private void handleTransferInstantBuyComplete(String message) {
+		SenderInstantBuyWorkflow workflow = senderInstantBuyWorkflow;
+		if (workflow == null) {
+			return;
+		}
+		workflow.onChatMessage(message);
 	}
 
 	private void startReceiverClaimSellOfferWorkflow(String itemName, int quantity) {
@@ -2213,6 +2222,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		SUBMIT_AMOUNT,
 		WAIT_CONFIRM_INSTANT_BUY,
 		CLICK_CONFIRM_INSTANT_BUY,
+		WAIT_BUY_COMPLETE,
 		DONE,
 		ERROR
 	}
@@ -2221,6 +2231,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private final String itemName;
 		private final int quantity;
 		private SenderInstantBuyState state = SenderInstantBuyState.OPEN_BAZAAR;
+		private boolean buyCompleteSeen;
 		private long nextActionAt;
 		private long stateStartedAt;
 
@@ -2242,6 +2253,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				runState(client);
 			} catch (Exception e) {
 				fail(client, e.getMessage());
+			}
+		}
+
+		private void onChatMessage(String message) {
+			if (BazaarTransferWorkflow.isInstantBuyCompleteMessage(message, itemName)) {
+				buyCompleteSeen = true;
 			}
 		}
 
@@ -2326,6 +2343,13 @@ public class AutoauctionClient implements ClientModInitializer {
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Confirm Instant Buy"));
 					actions.clickSlot(client, slot);
 					actions.closeScreen(client);
+					transition(SenderInstantBuyState.WAIT_BUY_COMPLETE, client);
+				}
+				case WAIT_BUY_COMPLETE -> {
+					if (!buyCompleteSeen) {
+						timeout(client, config.screenTimeoutMs(), "instant-buy completion chat did not arrive");
+						return;
+					}
 					if (!modSocketClient.sellOfferBought(quantity)) {
 						fail(client, "could not notify receiver that sell offer was bought");
 						return;

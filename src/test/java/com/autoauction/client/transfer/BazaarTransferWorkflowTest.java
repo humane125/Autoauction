@@ -70,6 +70,18 @@ class BazaarTransferWorkflowTest {
 	}
 
 	@Test
+	void stripsFormattingAndDetectsInstantBuyCompleteChat() {
+		String section = "\u00a7";
+		String message = section + "6[Bazaar] " + section + "eBought " + section + "7384" + section + "7x "
+			+ section + "aWet Water " + section + "efor " + section + "61,343,347 coins" + section + "e!";
+
+		assertEquals("[Bazaar] Bought 384x Wet Water for 1,343,347 coins!", BazaarTransferWorkflow.cleanChatMessage(message));
+		assertTrue(BazaarTransferWorkflow.isInstantBuyCompleteMessage(message, "Wet Water"));
+		assertTrue(BazaarTransferWorkflow.isInstantBuyCompleteMessage(message, "wet water"));
+		assertFalse(BazaarTransferWorkflow.isInstantBuyCompleteMessage(message, "Ender Pearl"));
+	}
+
+	@Test
 	void stripsFormattingAndDetectsFilledBuyOrderChat() {
 		String message = "\u00a76[Bazaar] \u00a7eYour \u00a7aBuy Order \u00a7efor \u00a7a1\u00a77x \u00a79Blaze Rod Distillate \u00a7ewas filled!";
 

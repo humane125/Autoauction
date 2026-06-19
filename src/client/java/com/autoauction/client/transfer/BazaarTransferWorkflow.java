@@ -99,6 +99,17 @@ public final class BazaarTransferWorkflow {
 			&& comparableClean.contains("wasfilled");
 	}
 
+	public static boolean isInstantBuyCompleteMessage(String message, String itemName) {
+		String clean = cleanChatMessage(message);
+		String comparableClean = comparable(clean);
+		String comparableItem = comparable(itemName);
+		return !comparableItem.isBlank()
+			&& comparableClean.contains("bazaar")
+			&& comparableClean.contains("bought")
+			&& comparableClean.contains(comparableItem)
+			&& comparableClean.contains("coins");
+	}
+
 	public static String cleanChatMessage(String message) {
 		return String.valueOf(message == null ? "" : message)
 			.replaceAll("(?i)\u00a7[0-9A-FK-ORX]", "")
