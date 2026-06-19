@@ -11,6 +11,7 @@ class BazaarTransferWorkflowTest {
 	void definesReceiverBuyOrderSlotsFromDump() {
 		assertEquals(15, BazaarTransferWorkflow.CREATE_BUY_ORDER_SLOT);
 		assertEquals(16, BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
+		assertEquals(13, BazaarTransferWorkflow.INSTANT_BUY_CUSTOM_AMOUNT_SLOT);
 		assertEquals(12, BazaarTransferWorkflow.TOP_ORDER_PLUS_0_1_SLOT);
 		assertEquals(13, BazaarTransferWorkflow.CONFIRM_BUY_ORDER_SLOT);
 		assertEquals(11, BazaarTransferWorkflow.SELL_INSTANTLY_SLOT);

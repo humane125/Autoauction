@@ -2312,7 +2312,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case CLICK_CUSTOM_AMOUNT -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
-						.orElse(BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
+						.orElse(BazaarTransferWorkflow.INSTANT_BUY_CUSTOM_AMOUNT_SLOT);
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Custom Amount"));
 					actions.clickSlot(client, slot);
 					transition(SenderInstantBuyState.WAIT_AMOUNT_SIGN, client);

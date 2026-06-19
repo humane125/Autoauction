@@ -5,6 +5,7 @@ import java.util.Locale;
 public final class BazaarTransferWorkflow {
 	public static final int CREATE_BUY_ORDER_SLOT = 15;
 	public static final int CUSTOM_AMOUNT_SLOT = 16;
+	public static final int INSTANT_BUY_CUSTOM_AMOUNT_SLOT = 13;
 	public static final int TOP_ORDER_PLUS_0_1_SLOT = 12;
 	public static final int CONFIRM_BUY_ORDER_SLOT = 13;
 	public static final int SELL_INSTANTLY_SLOT = 11;
