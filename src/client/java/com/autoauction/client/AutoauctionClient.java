@@ -2224,6 +2224,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		SUBMIT_AMOUNT,
 		WAIT_CONFIRM_INSTANT_BUY,
 		CLICK_CONFIRM_INSTANT_BUY,
+		CLICK_BUY_WARNING_CONFIRM,
 		WAIT_BUY_COMPLETE,
 		DONE,
 		ERROR
@@ -2312,7 +2313,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case CLICK_CUSTOM_AMOUNT -> {
 					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
-						.orElse(BazaarTransferWorkflow.INSTANT_BUY_CUSTOM_AMOUNT_SLOT);
+						.orElse(BazaarTransferWorkflow.CUSTOM_AMOUNT_SLOT);
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Custom Amount"));
 					actions.clickSlot(client, slot);
 					transition(SenderInstantBuyState.WAIT_AMOUNT_SIGN, client);
@@ -2334,28 +2335,39 @@ public class AutoauctionClient implements ClientModInitializer {
 					transition(SenderInstantBuyState.WAIT_CONFIRM_INSTANT_BUY, client);
 				}
 				case WAIT_CONFIRM_INSTANT_BUY -> {
-					if (!BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client)) && !BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client))) {
+					if (!BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client))) {
 						timeout(client, config.screenTimeoutMs(), "Confirm Instant Buy screen did not open");
-						return;
-					}
-					if (actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME).isEmpty()) {
-						timeout(client, config.screenTimeoutMs(), "Confirm Instant Buy button is still locked behind warning timer");
 						return;
 					}
 					transition(SenderInstantBuyState.CLICK_CONFIRM_INSTANT_BUY, client);
 				}
 				case CLICK_CONFIRM_INSTANT_BUY -> {
-					int slot = actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME)
-						.orElse(BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
+					int slot = BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT;
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Confirm Instant Buy"));
 					actions.clickSlot(client, slot);
 					confirmBuyClicks++;
 					transition(SenderInstantBuyState.WAIT_BUY_COMPLETE, client);
 				}
+				case CLICK_BUY_WARNING_CONFIRM -> {
+					if (!BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client))) {
+						timeout(client, config.screenTimeoutMs(), "instant buy warning screen disappeared before confirm");
+						return;
+					}
+					int slot = actions.findHandlerSlotByExactItemName(client, "WARNING")
+						.orElse(BazaarTransferWorkflow.INSTANT_SELL_WARNING_SLOT);
+					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " WARNING confirm"));
+					actions.clickSlot(client, slot);
+					transition(SenderInstantBuyState.WAIT_BUY_COMPLETE, client);
+				}
 				case WAIT_BUY_COMPLETE -> {
 					if (!buyCompleteSeen) {
-						if ((BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client)) || BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client)))
-							&& actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME).isPresent()
+						String title = screenTitle(client);
+						if (BazaarTransferWorkflow.isInstantSellWarningScreen(title)) {
+							debug(client, transferStep("sender", "instant-buy", quantity, itemName, "warning screen opened; wait 6000ms before confirm"));
+							transition(SenderInstantBuyState.CLICK_BUY_WARNING_CONFIRM, client, INSTANT_SELL_WARNING_DELAY_MS);
+							return;
+						}
+						if (BazaarTransferWorkflow.isConfirmInstantBuyScreen(title)
 							&& confirmBuyClicks < INSTANT_BUY_CONFIRM_MAX_CLICKS
 							&& System.currentTimeMillis() - stateStartedAt > INSTANT_BUY_CONFIRM_RETRY_DELAY_MS) {
 							debug(client, transferStep("sender", "instant-buy", quantity, itemName,
