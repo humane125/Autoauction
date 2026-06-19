@@ -61,6 +61,30 @@ public record EnderChestParkingPlan(
 		return new EnderChestParkingPlan(transferQuantity, parkQuantity, requiredParkSlots, StopReason.NONE);
 	}
 
+	public static EnderChestParkingPlan createForPersistentParking(
+		int inventoryQuantity,
+		int currentlyParkedStacks,
+		long senderPurse,
+		long reserveCoins,
+		double buyBackPricePerItem,
+		double estimatedProfitPerItem,
+		long remainingTargetCoins,
+		int emptyEnderChestSlots
+	) {
+		int parkedStacks = Math.max(0, currentlyParkedStacks);
+		int availableQuantity = Math.max(0, inventoryQuantity) + parkedStacks * STACK_SIZE;
+		long availableParkSlots = (long) Math.max(0, emptyEnderChestSlots) + parkedStacks;
+		return createForTarget(
+			availableQuantity,
+			senderPurse,
+			reserveCoins,
+			buyBackPricePerItem,
+			estimatedProfitPerItem,
+			remainingTargetCoins,
+			availableParkSlots > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) availableParkSlots
+		);
+	}
+
 	public boolean canRun() {
 		return stopReason == StopReason.NONE;
 	}

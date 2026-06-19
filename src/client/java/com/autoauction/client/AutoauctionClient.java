@@ -610,6 +610,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		sendTransferFeedback("AutoAuction transfer cycle complete for " + cycle.quantity() + "x " + itemName
 			+ ": receiver delta=" + formatSignedCoins(cycle.delta()) + ".");
 		if (goal == null) {
+			Minecraft.getInstance().execute(() -> startSenderEnderChestRestoreIfNeeded(Minecraft.getInstance()));
 			return;
 		}
 
@@ -625,11 +626,13 @@ public class AutoauctionClient implements ClientModInitializer {
 				+ " cycles. Receiver purse start=" + formatCoins(progress.startingPurse())
 				+ ", done=" + formatCoins(progress.donePurse())
 				+ ", total delta=" + formatSignedCoins(progress.totalPurseDelta()) + ".");
+			Minecraft.getInstance().execute(() -> startSenderEnderChestRestoreIfNeeded(Minecraft.getInstance()));
 			return;
 		}
 		if (cycle.delta() <= 0) {
 			transferLoopGoal = null;
 			sendTransferFeedback("AutoAuction transfer loop stopped: receiver delta was not positive, so continuing would not move toward the target.");
+			Minecraft.getInstance().execute(() -> startSenderEnderChestRestoreIfNeeded(Minecraft.getInstance()));
 			return;
 		}
 
@@ -637,6 +640,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (!transferController.canRunAsSender()) {
 				transferLoopGoal = null;
 				sendTransferFeedback("AutoAuction transfer loop stopped: this account is no longer the paired sender.");
+				startSenderEnderChestRestoreIfNeeded(Minecraft.getInstance());
 				return;
 			}
 			requestPreparedTransferRun(Minecraft.getInstance(), itemName, true);
@@ -835,7 +839,14 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void requestPreparedTransferRun(Minecraft client, String itemName, boolean loopContinuation) {
 		int quantity = actions.countInventoryItemsByName(client, itemName);
-		if (quantity <= 0) {
+		int parkedStacks = parkedStacksForItem(itemName);
+		if (senderParkedStacks > 0 && parkedStacks == 0) {
+			sendTransferFeedback("AutoAuction transfer run failed: parked stacks for " + senderParkedItemName + " must be restored before running " + itemName + ".");
+			transferLoopGoal = null;
+			startSenderEnderChestRestoreIfNeeded(client);
+			return;
+		}
+		if (quantity <= 0 && parkedStacks <= 0) {
 			sendTransferFeedback("AutoAuction transfer run failed: no inventory items matching " + itemName + ".");
 			transferLoopGoal = null;
 			return;
@@ -858,6 +869,28 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				double estimatedProfitPerItem = estimatedTransferProfitPerItem(status.get().buyPrice(), status.get().sellPrice());
 				long remainingTarget = transferLoopGoal == null ? Long.MAX_VALUE : transferLoopGoal.remainingCoins();
+				EnderChestParkingPlan plan = EnderChestParkingPlan.createForPersistentParking(
+					quantity,
+					parkedStacks,
+					purse.getAsLong(),
+					0L,
+					status.get().buyPrice(),
+					estimatedProfitPerItem,
+					remainingTarget,
+					Integer.MAX_VALUE
+				);
+				if (!plan.canRun()) {
+					sendTransferFeedback("AutoAuction transfer run failed: " + transferPrepareStopReasonMessage(plan.stopReason()) + ".");
+					transferLoopGoal = null;
+					return;
+				}
+				if (parkedStacks == plan.requiredParkSlots()) {
+					sendTransferFeedback("AutoAuction transfer safe stack quantity ready without EC adjustment for " + itemName + ".");
+					if (!sendPreparedTransferRun(Minecraft.getInstance(), itemName, plan.transferQuantity(), loopContinuation)) {
+						transferLoopGoal = null;
+					}
+					return;
+				}
 				senderPrepareTransferWorkflow = new SenderPrepareTransferWorkflow(
 					itemName,
 					loopContinuation,
@@ -890,6 +923,22 @@ public class AutoauctionClient implements ClientModInitializer {
 		double receiverBuyCost = quickSellPrice + 0.1D;
 		double receiverSellRevenue = Math.max(0D, quickBuyPrice - 0.1D) * 0.9875D;
 		return Math.max(0D, receiverSellRevenue - receiverBuyCost);
+	}
+
+	private int parkedStacksForItem(String itemName) {
+		if (senderParkedStacks <= 0 || senderParkedItemName == null || !senderParkedItemName.equalsIgnoreCase(itemName)) {
+			return 0;
+		}
+		return senderParkedStacks;
+	}
+
+	private String transferPrepareStopReasonMessage(EnderChestParkingPlan.StopReason reason) {
+		return switch (reason) {
+			case BELOW_STACK -> "safe transfer quantity is below one stack";
+			case NO_PRICE -> "Bazaar buy-back price is unavailable";
+			case NOT_ENOUGH_EC_SPACE -> "not enough empty Ender Chest slots to park extra items safely";
+			case NONE -> "unknown transfer preparation stop";
+		};
 	}
 
 	private void startSenderEnderChestRestoreIfNeeded(Minecraft client) {
@@ -1667,6 +1716,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		OPEN_EC,
 		WAIT_EC,
 		PARK_STACK,
+		RESTORE_STACK,
 		CLOSE_EC,
 		SEND_RUN,
 		DONE,
@@ -1691,7 +1741,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private final long remainingTargetCoins;
 		private SenderPrepareTransferState state = SenderPrepareTransferState.OPEN_EC;
 		private EnderChestParkingPlan plan;
-		private int stacksToPark;
+		private int desiredParkedStacks;
 		private long nextActionAt;
 		private long stateStartedAt;
 
@@ -1738,10 +1788,16 @@ public class AutoauctionClient implements ClientModInitializer {
 						timeout(client, config.screenTimeoutMs(), "Ender Chest did not open for sender transfer preparation");
 						return;
 					}
+					if (senderParkedStacks > 0 && parkedStacksForItem(itemName) == 0) {
+						fail(client, "parked stacks for " + senderParkedItemName + " must be restored before preparing " + itemName);
+						return;
+					}
 					int inventoryQuantity = actions.countInventoryItemsByName(client, itemName);
 					int emptyEcSlots = actions.emptyHandlerSlotsInRange(client, EC_STORAGE_FIRST_SLOT, EC_STORAGE_LAST_SLOT).size();
-					plan = EnderChestParkingPlan.createForTarget(
+					int currentParkedStacks = parkedStacksForItem(itemName);
+					plan = EnderChestParkingPlan.createForPersistentParking(
 						inventoryQuantity,
+						currentParkedStacks,
 						senderPurse,
 						0L,
 						buyBackPricePerItem,
@@ -1750,23 +1806,26 @@ public class AutoauctionClient implements ClientModInitializer {
 						emptyEcSlots
 					);
 					if (!plan.canRun()) {
-						fail(client, stopReasonMessage(plan.stopReason()));
+						fail(client, transferPrepareStopReasonMessage(plan.stopReason()));
 						return;
 					}
-					stacksToPark = plan.requiredParkSlots();
-					senderParkedItemName = itemName;
-					senderParkedStacks = 0;
+					desiredParkedStacks = plan.requiredParkSlots();
+					if (desiredParkedStacks > 0 || senderParkedStacks > 0) {
+						senderParkedItemName = itemName;
+					}
 					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName,
-						"safe stack plan: park " + plan.parkQuantity() + " items in " + stacksToPark + " EC slots"));
-					transition(stacksToPark > 0 ? SenderPrepareTransferState.PARK_STACK : SenderPrepareTransferState.CLOSE_EC, client);
+						"safe stack plan: transfer " + plan.transferQuantity()
+							+ ", desired parked stacks " + desiredParkedStacks
+							+ ", current parked stacks " + currentParkedStacks));
+					transition(nextAdjustmentState(), client);
 				}
 				case PARK_STACK -> {
 					if (!actions.isEnderChestOpen(client)) {
 						timeout(client, config.screenTimeoutMs(), "Ender Chest closed while parking sender stacks");
 						return;
 					}
-					if (stacksToPark <= 0) {
-						transition(SenderPrepareTransferState.CLOSE_EC, client);
+					if (senderParkedStacks >= desiredParkedStacks) {
+						transition(nextAdjustmentState(), client);
 						return;
 					}
 					List<Integer> fullStacks = actions.matchingFullStackHandlerSlotsInRange(client, itemName, PLAYER_INVENTORY_FIRST_SLOT, PLAYER_INVENTORY_LAST_SLOT);
@@ -1777,9 +1836,32 @@ public class AutoauctionClient implements ClientModInitializer {
 					int slot = fullStacks.getFirst();
 					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName, "quick-move extra stack from slot " + slot + " to EC"));
 					actions.quickMoveSlot(client, slot);
-					stacksToPark--;
 					senderParkedStacks++;
-					transition(stacksToPark > 0 ? SenderPrepareTransferState.PARK_STACK : SenderPrepareTransferState.CLOSE_EC, client);
+					senderParkedItemName = itemName;
+					transition(nextAdjustmentState(), client);
+				}
+				case RESTORE_STACK -> {
+					if (!actions.isEnderChestOpen(client)) {
+						timeout(client, config.screenTimeoutMs(), "Ender Chest closed while restoring sender stacks for next run");
+						return;
+					}
+					if (senderParkedStacks <= desiredParkedStacks) {
+						transition(nextAdjustmentState(), client);
+						return;
+					}
+					List<Integer> fullStacks = actions.matchingFullStackHandlerSlotsInRange(client, itemName, EC_STORAGE_FIRST_SLOT, EC_STORAGE_LAST_SLOT);
+					if (fullStacks.isEmpty()) {
+						fail(client, "could not find parked full " + itemName + " stacks in Ender Chest");
+						return;
+					}
+					int slot = fullStacks.getFirst();
+					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName, "quick-move parked stack from EC slot " + slot + " to inventory"));
+					actions.quickMoveSlot(client, slot);
+					senderParkedStacks = Math.max(0, senderParkedStacks - 1);
+					if (senderParkedStacks == 0) {
+						senderParkedItemName = null;
+					}
+					transition(nextAdjustmentState(), client);
 				}
 				case CLOSE_EC -> {
 					actions.closeScreen(client);
@@ -1797,13 +1879,14 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 		}
 
-		private String stopReasonMessage(EnderChestParkingPlan.StopReason reason) {
-			return switch (reason) {
-				case BELOW_STACK -> "safe transfer quantity is below one stack";
-				case NO_PRICE -> "Bazaar buy-back price is unavailable";
-				case NOT_ENOUGH_EC_SPACE -> "not enough empty Ender Chest slots to park extra items safely";
-				case NONE -> "unknown transfer preparation stop";
-			};
+		private SenderPrepareTransferState nextAdjustmentState() {
+			if (senderParkedStacks < desiredParkedStacks) {
+				return SenderPrepareTransferState.PARK_STACK;
+			}
+			if (senderParkedStacks > desiredParkedStacks) {
+				return SenderPrepareTransferState.RESTORE_STACK;
+			}
+			return SenderPrepareTransferState.CLOSE_EC;
 		}
 
 		private void transition(SenderPrepareTransferState next, Minecraft client) {
@@ -2101,7 +2184,6 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (client.player != null) {
 				client.player.sendSystemMessage(Component.literal(message));
 			}
-			startSenderEnderChestRestoreIfNeeded(client);
 		}
 
 		private void fail(Minecraft client, String message) {

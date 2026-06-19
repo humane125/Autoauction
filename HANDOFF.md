@@ -28,10 +28,13 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
 - Receiver claim delta waits for purse update to avoid stale scoreboard/negative delta.
 - Sender transfer preparation now calculates a safe full-stack transfer quantity before each run.
 - There is no automatic coin reserve subtraction; the operator should set the target lower if they want coins left over.
-- Sender opens `/ec`, counts empty Ender Chest storage slots, parks extra full stacks of the selected item, sends only the safe stack-rounded run quantity, then restores the parked stacks after instant-selling.
+- Sender only lets the receiver create a buy order after sender preparation completes. If parking is needed, sender opens `/ec`, parks/rebalances first, closes EC, then sends the receiver run.
+- If the current inventory plus already parked EC stacks are already balanced for the next run, sender skips `/ec` and continues normally.
+- Parked stacks persist across target-loop cycles. The next cycle treats inventory plus tracked parked stacks as available quantity, then parks more or restores only the stacks needed for that cycle.
+- Parked stacks restore when a single run completes, the target is reached, the loop stops, the transfer is cancelled, or an error path needs cleanup.
 - The current EC parking slice only moves full stacks. It does not split partial stacks or select exact custom item counts from inventory.
 - Sender instant-sell now left-clicks `Sell Instantly` once. EC parking is what makes the inventory safe, so no instant-sell amount screen is used.
-- If the optional instant-sell warning appears, sender waits 6 seconds, confirms, closes Bazaar, then restores parked stacks.
+- If the optional instant-sell warning appears, sender waits 6 seconds, confirms, and closes Bazaar.
 - Transfer debug messages were made clearer with workflow, state, item, quantity, and delay details.
 - Bazaar estimate math was fixed: Hypixel `quick_status.sellPrice` is the receiver buy cost side and `quick_status.buyPrice` is the receiver sell revenue side.
 - Bazaar product ID resolution was hardened:

@@ -41,6 +41,25 @@ class EnderChestParkingPlanTest {
 	}
 
 	@Test
+	void reusesAlreadyParkedStacksAsAvailableQuantityAndCapacity() {
+		EnderChestParkingPlan plan = EnderChestParkingPlan.createForPersistentParking(
+			0,
+			6,
+			200_000_000L,
+			0L,
+			100_000D,
+			25_000D,
+			3_200_000L,
+			0
+		);
+
+		assertTrue(plan.canRun());
+		assertEquals(128, plan.transferQuantity());
+		assertEquals(256, plan.parkQuantity());
+		assertEquals(4, plan.requiredParkSlots());
+	}
+
+	@Test
 	void stopsWhenSafeQuantityIsBelowOneStack() {
 		EnderChestParkingPlan plan = EnderChestParkingPlan.create(
 			128,
