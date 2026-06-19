@@ -80,6 +80,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int BAZAAR_CLOSE_DELAY_MS = 1_000;
 	private static final int INSTANT_SELL_WARNING_DELAY_MS = 6_000;
 	private static final int INSTANT_SELL_WARNING_GRACE_MS = 1_500;
+	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
+	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -2232,6 +2234,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private final int quantity;
 		private SenderInstantBuyState state = SenderInstantBuyState.OPEN_BAZAAR;
 		private boolean buyCompleteSeen;
+		private int confirmBuyClicks;
 		private long nextActionAt;
 		private long stateStartedAt;
 
@@ -2342,14 +2345,23 @@ public class AutoauctionClient implements ClientModInitializer {
 						.orElse(BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Confirm Instant Buy"));
 					actions.clickSlot(client, slot);
-					actions.closeScreen(client);
+					confirmBuyClicks++;
 					transition(SenderInstantBuyState.WAIT_BUY_COMPLETE, client);
 				}
 				case WAIT_BUY_COMPLETE -> {
 					if (!buyCompleteSeen) {
+						if (BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client))
+							&& confirmBuyClicks < INSTANT_BUY_CONFIRM_MAX_CLICKS
+							&& System.currentTimeMillis() - stateStartedAt > INSTANT_BUY_CONFIRM_RETRY_DELAY_MS) {
+							debug(client, transferStep("sender", "instant-buy", quantity, itemName,
+								"confirm screen still open; retry Confirm Instant Buy click " + (confirmBuyClicks + 1)));
+							transition(SenderInstantBuyState.CLICK_CONFIRM_INSTANT_BUY, client);
+							return;
+						}
 						timeout(client, config.screenTimeoutMs(), "instant-buy completion chat did not arrive");
 						return;
 					}
+					actions.closeScreen(client);
 					if (!modSocketClient.sellOfferBought(quantity)) {
 						fail(client, "could not notify receiver that sell offer was bought");
 						return;
