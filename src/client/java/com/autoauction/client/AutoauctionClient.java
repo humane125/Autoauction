@@ -2334,14 +2334,18 @@ public class AutoauctionClient implements ClientModInitializer {
 					transition(SenderInstantBuyState.WAIT_CONFIRM_INSTANT_BUY, client);
 				}
 				case WAIT_CONFIRM_INSTANT_BUY -> {
-					if (!BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client))) {
+					if (!BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client)) && !BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client))) {
 						timeout(client, config.screenTimeoutMs(), "Confirm Instant Buy screen did not open");
+						return;
+					}
+					if (actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME).isEmpty()) {
+						timeout(client, config.screenTimeoutMs(), "Confirm Instant Buy button is still locked behind warning timer");
 						return;
 					}
 					transition(SenderInstantBuyState.CLICK_CONFIRM_INSTANT_BUY, client);
 				}
 				case CLICK_CONFIRM_INSTANT_BUY -> {
-					int slot = actions.findHandlerSlotByExactItemName(client, "Custom Amount")
+					int slot = actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME)
 						.orElse(BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
 					debug(client, transferStep("sender", "instant-buy", quantity, itemName, "click slot " + slot + " Confirm Instant Buy"));
 					actions.clickSlot(client, slot);
@@ -2350,7 +2354,8 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_BUY_COMPLETE -> {
 					if (!buyCompleteSeen) {
-						if (BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client))
+						if ((BazaarTransferWorkflow.isConfirmInstantBuyScreen(screenTitle(client)) || BazaarTransferWorkflow.isInstantSellWarningScreen(screenTitle(client)))
+							&& actions.findHandlerSlotByExactItemName(client, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME).isPresent()
 							&& confirmBuyClicks < INSTANT_BUY_CONFIRM_MAX_CLICKS
 							&& System.currentTimeMillis() - stateStartedAt > INSTANT_BUY_CONFIRM_RETRY_DELAY_MS) {
 							debug(client, transferStep("sender", "instant-buy", quantity, itemName,

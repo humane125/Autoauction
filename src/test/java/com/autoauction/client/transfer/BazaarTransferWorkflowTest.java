@@ -21,6 +21,7 @@ class BazaarTransferWorkflowTest {
 		assertEquals(13, BazaarTransferWorkflow.CONFIRM_SELL_OFFER_SLOT);
 		assertEquals(10, BazaarTransferWorkflow.BUY_INSTANTLY_SLOT);
 		assertEquals(13, BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_SLOT);
+		assertEquals("Confirm", BazaarTransferWorkflow.CONFIRM_INSTANT_BUY_READY_NAME);
 		assertEquals(32, BazaarTransferWorkflow.CLAIM_ALL_COINS_SLOT);
 	}
 

@@ -15,6 +15,7 @@ public final class BazaarTransferWorkflow {
 	public static final int CONFIRM_SELL_OFFER_SLOT = 13;
 	public static final int BUY_INSTANTLY_SLOT = 10;
 	public static final int CONFIRM_INSTANT_BUY_SLOT = 13;
+	public static final String CONFIRM_INSTANT_BUY_READY_NAME = "Confirm";
 	public static final int CLAIM_ALL_COINS_SLOT = 32;
 
 	private BazaarTransferWorkflow() {
