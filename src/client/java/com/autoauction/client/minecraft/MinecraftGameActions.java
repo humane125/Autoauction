@@ -175,12 +175,24 @@ public final class MinecraftGameActions {
 		client.gameMode.handleContainerInput(client.player.containerMenu.containerId, handlerSlot, 0, ContainerInput.PICKUP, client.player);
 	}
 
+	public void quickMoveSlot(Minecraft client, int handlerSlot) {
+		if (client.player == null || client.gameMode == null) {
+			return;
+		}
+
+		client.gameMode.handleContainerInput(client.player.containerMenu.containerId, handlerSlot, 0, ContainerInput.QUICK_MOVE, client.player);
+	}
+
 	public boolean screenTitleContains(Minecraft client, String text) {
 		return client.screen != null && client.screen.getTitle().getString().contains(text);
 	}
 
 	public boolean isBazaarOpen(Minecraft client) {
 		return screenTitleMatches(client, MinecraftGameActions::isBazaarTitle);
+	}
+
+	public boolean isEnderChestOpen(Minecraft client) {
+		return screenTitleContains(client, "Ender Chest");
 	}
 
 	public boolean isSellInventoryConfirmOpen(Minecraft client) {
@@ -217,6 +229,35 @@ public final class MinecraftGameActions {
 
 	public Optional<Integer> findHandlerSlotByExactItemName(Minecraft client, String itemName) {
 		return findHandlerSlotByItemNameMatching(client, candidate -> itemNameExactlyMatches(candidate, itemName));
+	}
+
+	public List<Integer> emptyHandlerSlotsInRange(Minecraft client, int firstHandlerSlot, int lastHandlerSlot) {
+		List<Integer> slots = new ArrayList<>();
+		if (client.player == null) {
+			return slots;
+		}
+		int end = Math.min(lastHandlerSlot, client.player.containerMenu.slots.size() - 1);
+		for (int handlerSlot = Math.max(0, firstHandlerSlot); handlerSlot <= end; handlerSlot++) {
+			if (client.player.containerMenu.slots.get(handlerSlot).getItem().isEmpty()) {
+				slots.add(handlerSlot);
+			}
+		}
+		return slots;
+	}
+
+	public List<Integer> matchingFullStackHandlerSlotsInRange(Minecraft client, String itemNamePart, int firstHandlerSlot, int lastHandlerSlot) {
+		List<Integer> slots = new ArrayList<>();
+		if (client.player == null) {
+			return slots;
+		}
+		int end = Math.min(lastHandlerSlot, client.player.containerMenu.slots.size() - 1);
+		for (int handlerSlot = Math.max(0, firstHandlerSlot); handlerSlot <= end; handlerSlot++) {
+			ItemStack stack = client.player.containerMenu.slots.get(handlerSlot).getItem();
+			if (!stack.isEmpty() && stack.getCount() >= stack.getMaxStackSize() && itemNameMatches(stack.getHoverName().getString(), itemNamePart)) {
+				slots.add(handlerSlot);
+			}
+		}
+		return slots;
 	}
 
 	private Optional<Integer> findHandlerSlotByItemNameMatching(Minecraft client, Predicate<String> matcher) {

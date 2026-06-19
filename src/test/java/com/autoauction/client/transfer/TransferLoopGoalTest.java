@@ -19,6 +19,7 @@ class TransferLoopGoalTest {
 		assertEquals(47_500_000L, first.totalPurseDelta());
 		assertEquals(152_500_000L, first.remaining());
 		assertEquals(4, first.estimatedCyclesRemaining());
+		assertEquals(152_500_000L, goal.remainingCoins());
 		assertFalse(first.complete());
 
 		TransferLoopGoal.Progress second = goal.recordCycle(160_000_000L, 48_500_000L, 208_500_000L);
@@ -29,6 +30,7 @@ class TransferLoopGoalTest {
 		assertEquals(207_500_000L, second.totalPurseDelta());
 		assertEquals(0L, second.remaining());
 		assertEquals(0, second.estimatedCyclesRemaining());
+		assertEquals(0L, goal.remainingCoins());
 		assertTrue(second.complete());
 	}
 

@@ -1,19 +1,20 @@
 # AutoAuction Handoff
 
-Date: 2026-06-18
+Date: 2026-06-19
 Branch: `main`
-Latest local commit before this handoff: `e18d99d Resolve bazaar product id aliases`
+Latest local commit before this handoff: `f127306 Add Prism account import fallback`
 
 ## Current Setup
 
-- Local repo: `C:\Projects\Hypixel\Minecraft Mod\26.1.1`
+- Local repo: `C:\Humane\Hypixel\Minecraft Mod\26.1.1`
 - GitHub remote: `https://github.com/humane125/Autoauction.git`
 - Current public API URL: `https://humane-hypixel.duckdns.org`
 - Old ngrok URL is deprecated: `https://lazy-similarly-reaffirm.ngrok-free.dev`
 - Built jar: `build\libs\autoauction-1.0.0.jar`
 - Active Prism mod folders:
-  - `C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods`
-  - `C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2 rivoh\minecraft\mods`
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods`
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test\minecraft\mods`
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test(1)\minecraft\mods`
 
 Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs/`, or Minecraft account data.
 
@@ -25,6 +26,11 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
 - Transfer target loops now continue until the receiver-reported purse delta reaches or exceeds the requested target.
 - Final target output now reports receiver starting purse, done purse, and total delta.
 - Receiver claim delta waits for purse update to avoid stale scoreboard/negative delta.
+- Sender transfer preparation now calculates a safe full-stack transfer quantity before each run.
+- There is no automatic coin reserve subtraction; the operator should set the target lower if they want coins left over.
+- Sender opens `/ec`, counts empty Ender Chest storage slots, parks extra full stacks of the selected item, sends only the safe stack-rounded run quantity, then restores the parked stacks after instant-selling.
+- The current EC parking slice only moves full stacks. It does not split partial stacks or select exact custom item counts from inventory.
+- Sender instant-sell now uses the Bazaar instant-sell amount screen and clicks `Sell a stack!` repeatedly for the prepared stack count, including the optional 6-second warning confirm.
 - Transfer debug messages were made clearer with workflow, state, item, quantity, and delay details.
 - Bazaar estimate math was fixed: Hypixel `quick_status.sellPrice` is the receiver buy cost side and `quick_status.buyPrice` is the receiver sell revenue side.
 - Bazaar product ID resolution was hardened:
@@ -57,31 +63,34 @@ Target examples support suffixes such as `k`, `m`, and `b`.
 - If inventory has no empty slot, the mod opens `/bz`, clicks sell-inventory flow, confirms, then retries.
 - After armor listing, AutoAuction asks Alt Manager for account switch/proxy handoff, waits for proxy readiness, waits 1.5 seconds, reconnects to Hypixel, waits for player/server availability, waits 0.5 seconds, then can run the macro start command.
 - Bazaar transfer starts from private island checks where implemented.
+- Bazaar transfer target safety is controlled by the target value the operator enters. Example: if sender has 200m and should keep about 10m, run the transfer target as about 190m.
 
 ## Verification
 
 Latest local verification before this handoff:
 
 ```powershell
-.\gradlew.bat test --tests com.autoauction.client.transfer.BazaarTransferEstimateTest
-.\gradlew.bat build
+.\gradlew.bat --no-daemon test --tests com.autoauction.client.transfer.EnderChestParkingPlanTest --tests com.autoauction.client.transfer.BazaarTransferWorkflowTest
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon build
 ```
 
-Both passed. The full build produced `autoauction-1.0.0.jar` and it was copied to both active Prism instances.
+All passed. The full build produced `autoauction-1.0.0.jar` and it was copied to all three active Prism instances.
 
 ## Build And Copy
 
 ```powershell
-cd "C:\Projects\Hypixel\Minecraft Mod\26.1.1"
+cd "C:\Humane\Hypixel\Minecraft Mod\26.1.1"
 .\gradlew.bat build
-Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods\autoauction-1.0.0.jar" -Force
-Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\moham\AppData\Roaming\PrismLauncher\instances\26.1.2 rivoh\minecraft\mods\autoauction-1.0.0.jar" -Force
+Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods\autoauction-1.0.0.jar" -Force
+Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test\minecraft\mods\autoauction-1.0.0.jar" -Force
+Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test(1)\minecraft\mods\autoauction-1.0.0.jar" -Force
 ```
 
 ## Next Work
 
 1. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
-2. Add configurable transfer quantity, max cycles, margin threshold, and safety controls.
+2. Add partial-stack inventory splitting if exact quantities smaller than a full-stack multiple are needed.
 3. Continue testing Bazaar product ID resolution with more item families.
 4. Add dashboard visibility for reconnects and live transfer session state.
 5. Commit any future runtime-flow changes immediately after verification.

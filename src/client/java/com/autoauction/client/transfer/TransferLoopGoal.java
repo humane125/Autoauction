@@ -48,6 +48,10 @@ public final class TransferLoopGoal {
 		return cycles;
 	}
 
+	public long remainingCoins() {
+		return Math.max(0, targetCoins - totalTransferred);
+	}
+
 	public record Progress(
 		long targetCoins,
 		long totalTransferred,

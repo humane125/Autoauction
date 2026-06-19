@@ -8,6 +8,7 @@ public final class BazaarTransferWorkflow {
 	public static final int TOP_ORDER_PLUS_0_1_SLOT = 12;
 	public static final int CONFIRM_BUY_ORDER_SLOT = 13;
 	public static final int SELL_INSTANTLY_SLOT = 11;
+	public static final int SELL_A_STACK_SLOT = 11;
 	public static final int INSTANT_SELL_WARNING_SLOT = 13;
 	public static final int MANAGE_ORDERS_SLOT = 50;
 	public static final int CREATE_SELL_OFFER_SLOT = 16;
@@ -49,6 +50,17 @@ public final class BazaarTransferWorkflow {
 
 	public static boolean isInstantSellWarningScreen(String title) {
 		return normalized(title).equals("confirm");
+	}
+
+	public static boolean isInstantSellAmountScreen(String title) {
+		String cleanTitle = normalized(title);
+		if (cleanTitle.contains("instant buy")) {
+			return false;
+		}
+		if (cleanTitle.contains("\u279c instan")) {
+			return true;
+		}
+		return cleanTitle.contains("instant sell") || cleanTitle.contains("âžœ instan") || cleanTitle.contains("Ã¢Å¾Å“ instan");
 	}
 
 	public static boolean isInstantBuyAmountScreen(String title) {

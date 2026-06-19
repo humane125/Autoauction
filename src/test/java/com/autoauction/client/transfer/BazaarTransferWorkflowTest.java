@@ -14,6 +14,7 @@ class BazaarTransferWorkflowTest {
 		assertEquals(12, BazaarTransferWorkflow.TOP_ORDER_PLUS_0_1_SLOT);
 		assertEquals(13, BazaarTransferWorkflow.CONFIRM_BUY_ORDER_SLOT);
 		assertEquals(11, BazaarTransferWorkflow.SELL_INSTANTLY_SLOT);
+		assertEquals(11, BazaarTransferWorkflow.SELL_A_STACK_SLOT);
 		assertEquals(13, BazaarTransferWorkflow.INSTANT_SELL_WARNING_SLOT);
 		assertEquals(50, BazaarTransferWorkflow.MANAGE_ORDERS_SLOT);
 		assertEquals(16, BazaarTransferWorkflow.CREATE_SELL_OFFER_SLOT);
@@ -36,6 +37,8 @@ class BazaarTransferWorkflowTest {
 		assertTrue(BazaarTransferWorkflow.isBuyOrderPriceScreen("How much do you want to pay?"));
 		assertTrue(BazaarTransferWorkflow.isConfirmBuyOrderScreen("Confirm Buy Order"));
 		assertTrue(BazaarTransferWorkflow.isInstantSellWarningScreen("Confirm"));
+		assertTrue(BazaarTransferWorkflow.isInstantSellAmountScreen("Magma Cream Distillate \u279c Instant Sell"));
+		assertTrue(BazaarTransferWorkflow.isInstantSellAmountScreen("Magma Cream Distillate \u279c Instan"));
 		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instant Buy"));
 		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instan"));
 		assertTrue(BazaarTransferWorkflow.isConfirmInstantBuyScreen("Confirm Instant Buy"));
@@ -52,6 +55,8 @@ class BazaarTransferWorkflowTest {
 		assertFalse(BazaarTransferWorkflow.isBuyOrderPriceScreen("How many do you want?"));
 		assertFalse(BazaarTransferWorkflow.isConfirmBuyOrderScreen("Cancel Buy Order"));
 		assertFalse(BazaarTransferWorkflow.isInstantSellWarningScreen("Confirm Buy Order"));
+		assertFalse(BazaarTransferWorkflow.isInstantSellAmountScreen("Confirm"));
+		assertFalse(BazaarTransferWorkflow.isInstantSellAmountScreen("Magma Cream Distillate \u279c Instant Buy"));
 		assertFalse(BazaarTransferWorkflow.isInstantBuyAmountScreen("Confirm Instant Buy"));
 		assertFalse(BazaarTransferWorkflow.isConfirmInstantBuyScreen("Confirm Buy Order"));
 		assertFalse(BazaarTransferWorkflow.isOrdersScreen("Confirm Sell Offer"));
