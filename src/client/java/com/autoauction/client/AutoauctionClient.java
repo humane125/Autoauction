@@ -1657,8 +1657,6 @@ public class AutoauctionClient implements ClientModInitializer {
 		WAIT_PRIVATE_ISLAND,
 		WAIT_ITEM_PAGE,
 		CLICK_SELL_INSTANTLY,
-		WAIT_AMOUNT_SCREEN,
-		CLICK_SELL_STACK,
 		WAIT_WARNING_OR_DONE,
 		CLICK_WARNING_CONFIRM,
 		DONE,
@@ -1981,7 +1979,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final class SenderInstantSellWorkflow {
 		private final String itemName;
 		private final int quantity;
-		private int remainingStackSells;
 		private SenderInstantSellState state = SenderInstantSellState.OPEN_BAZAAR;
 		private long nextActionAt;
 		private long stateStartedAt;
@@ -1989,7 +1986,6 @@ public class AutoauctionClient implements ClientModInitializer {
 		private SenderInstantSellWorkflow(String itemName, int quantity) {
 			this.itemName = itemName;
 			this.quantity = Math.max(1, quantity);
-			this.remainingStackSells = Math.max(1, (this.quantity + EnderChestParkingPlan.STACK_SIZE - 1) / EnderChestParkingPlan.STACK_SIZE);
 		}
 
 		private void start(Minecraft client) {
@@ -2044,36 +2040,6 @@ public class AutoauctionClient implements ClientModInitializer {
 						.orElse(BazaarTransferWorkflow.SELL_INSTANTLY_SLOT);
 					debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + slot + " Sell Instantly"));
 					actions.clickSlot(client, slot);
-					transition(SenderInstantSellState.WAIT_AMOUNT_SCREEN, client);
-				}
-				case WAIT_AMOUNT_SCREEN -> {
-					String title = screenTitle(client);
-					if (BazaarTransferWorkflow.isInstantSellAmountScreen(title)) {
-						transition(SenderInstantSellState.CLICK_SELL_STACK, client);
-						return;
-					}
-					if (BazaarTransferWorkflow.isItemPage(title, itemName)) {
-						transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client);
-						return;
-					}
-					timeout(client, config.screenTimeoutMs(), "instant sell amount screen did not open for sender " + itemName);
-				}
-				case CLICK_SELL_STACK -> {
-					if (!BazaarTransferWorkflow.isInstantSellAmountScreen(screenTitle(client))) {
-						timeout(client, config.screenTimeoutMs(), "instant sell amount screen disappeared before stack sell");
-						return;
-					}
-					if (remainingStackSells <= 0) {
-						actions.closeScreen(client);
-						done(client, transferStep("sender", "instant-sell", quantity, itemName, "all prepared stacks sold; waiting for receiver buy-order fill"));
-						return;
-					}
-					int slot = actions.findHandlerSlotByExactItemName(client, "Sell a stack!")
-						.orElse(BazaarTransferWorkflow.SELL_A_STACK_SLOT);
-					debug(client, transferStep("sender", "instant-sell", quantity, itemName,
-						"click slot " + slot + " Sell a stack; remaining stacks before click " + remainingStackSells));
-					actions.clickSlot(client, slot);
-					remainingStackSells--;
 					transition(SenderInstantSellState.WAIT_WARNING_OR_DONE, client);
 				}
 				case WAIT_WARNING_OR_DONE -> {
@@ -2083,21 +2049,8 @@ public class AutoauctionClient implements ClientModInitializer {
 						return;
 					}
 					if (System.currentTimeMillis() - stateStartedAt > INSTANT_SELL_WARNING_GRACE_MS) {
-						if (remainingStackSells <= 0) {
-							actions.closeScreen(client);
-							done(client, transferStep("sender", "instant-sell", quantity, itemName, "all prepared stacks sold; waiting for receiver buy-order fill"));
-							return;
-						}
-						String title = screenTitle(client);
-						if (BazaarTransferWorkflow.isInstantSellAmountScreen(title)) {
-							transition(SenderInstantSellState.CLICK_SELL_STACK, client);
-							return;
-						}
-						if (BazaarTransferWorkflow.isItemPage(title, itemName)) {
-							transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client);
-							return;
-						}
-						timeout(client, config.screenTimeoutMs(), "sender instant sell did not return to item or amount screen");
+						actions.closeScreen(client);
+						done(client, transferStep("sender", "instant-sell", quantity, itemName, "instant sell clicked; waiting for receiver buy-order fill"));
 					}
 				}
 				case CLICK_WARNING_CONFIRM -> {
@@ -2109,7 +2062,8 @@ public class AutoauctionClient implements ClientModInitializer {
 						.orElse(BazaarTransferWorkflow.INSTANT_SELL_WARNING_SLOT);
 					debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + slot + " WARNING confirm"));
 					actions.clickSlot(client, slot);
-					transition(SenderInstantSellState.WAIT_WARNING_OR_DONE, client);
+					actions.closeScreen(client);
+					done(client, transferStep("sender", "instant-sell", quantity, itemName, "confirmed instant sell; waiting for receiver buy-order fill"));
 				}
 				case DONE, ERROR -> {
 				}
