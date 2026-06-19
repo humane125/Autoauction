@@ -25,10 +25,14 @@ import java.util.function.Consumer;
 public final class ModSocketClient implements AutoCloseable {
 	private static final Gson GSON = new Gson();
 	private static final long DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+	private static final long DEFAULT_RECONNECT_INITIAL_DELAY_MS = 100;
+	private static final long DEFAULT_RECONNECT_MAX_DELAY_MS = 30_000;
 
 	private final AutoAuctionConfig config;
 	private final Transport transport;
 	private final long heartbeatIntervalMs;
+	private final long reconnectInitialDelayMs;
+	private final long reconnectMaxDelayMs;
 	private final ScheduledExecutorService heartbeatExecutor;
 	private final Consumer<String> logSink;
 	private final Consumer<String> disconnectHandler;
@@ -36,11 +40,18 @@ public final class ModSocketClient implements AutoCloseable {
 
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
+	private ScheduledFuture<?> reconnectTask;
 	private boolean authenticated;
 	private String lastReportedStatus;
 	private String connectedUsername;
 	private String connectingUsername;
+	private String desiredUsername;
+	private String desiredClientVersion;
+	private String desiredStatus = "active";
+	private ModAccountStatusDetector.BanDetails desiredBanDetails;
+	private long reconnectDelayMs;
 	private long connectionGeneration;
+	private boolean closed;
 
 	public ModSocketClient(AutoAuctionConfig config) {
 		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), reason -> {});
@@ -74,33 +85,70 @@ public final class ModSocketClient implements AutoCloseable {
 		Consumer<String> disconnectHandler,
 		TransferHandler transferHandler
 	) {
+		this(
+			config,
+			transport,
+			heartbeatIntervalMs,
+			DEFAULT_RECONNECT_INITIAL_DELAY_MS,
+			DEFAULT_RECONNECT_MAX_DELAY_MS,
+			logSink,
+			disconnectHandler,
+			transferHandler
+		);
+	}
+
+	ModSocketClient(
+		AutoAuctionConfig config,
+		Transport transport,
+		long heartbeatIntervalMs,
+		long reconnectInitialDelayMs,
+		long reconnectMaxDelayMs,
+		Consumer<String> logSink,
+		Consumer<String> disconnectHandler,
+		TransferHandler transferHandler
+	) {
 		this.config = config;
 		this.transport = transport;
 		this.heartbeatIntervalMs = heartbeatIntervalMs;
+		this.reconnectInitialDelayMs = Math.max(1, reconnectInitialDelayMs);
+		this.reconnectMaxDelayMs = Math.max(this.reconnectInitialDelayMs, reconnectMaxDelayMs);
+		this.reconnectDelayMs = this.reconnectInitialDelayMs;
 		this.logSink = logSink;
 		this.disconnectHandler = disconnectHandler;
 		this.transferHandler = transferHandler == null ? TransferHandler.NOOP : transferHandler;
 		this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-			Thread thread = new Thread(runnable, "autoauction-mod-socket-heartbeat");
+			Thread thread = new Thread(runnable, "autoauction-mod-socket");
 			thread.setDaemon(true);
 			return thread;
 		});
 	}
 
 	public synchronized boolean start(String username, String clientVersion) {
+		String cleanUsername = String.valueOf(username == null ? "" : username).trim();
 		if (connection != null || connectingUsername != null) {
 			return false;
 		}
-		if (config.apiToken().isBlank() || String.valueOf(username).isBlank()) {
+		if (config.apiToken().isBlank() || cleanUsername.isBlank()) {
 			log("AutoAuction mod socket not started: API token missing or username missing");
 			return false;
 		}
 
+		closed = false;
+		desiredUsername = cleanUsername;
+		desiredClientVersion = String.valueOf(clientVersion == null ? "" : clientVersion);
+		cancelReconnect();
+		return connectNow(cleanUsername, desiredClientVersion);
+	}
+
+	private synchronized boolean connectNow(String username, String clientVersion) {
+		if (connection != null || connectingUsername != null || closed) {
+			return false;
+		}
 		URI uri = socketUri(config.apiBaseUrl());
 		log("AutoAuction mod socket connecting to " + uri);
 		long generation = ++connectionGeneration;
 		connectingUsername = username;
-		transport.connect(uri, new Listener() {
+		CompletableFuture<Connection> connectionFuture = transport.connect(uri, new Listener() {
 			@Override
 			public void onOpen(Connection openedConnection) {
 				synchronized (ModSocketClient.this) {
@@ -111,6 +159,8 @@ public final class ModSocketClient implements AutoCloseable {
 					connection = openedConnection;
 					connectedUsername = username;
 					connectingUsername = null;
+					reconnectDelayMs = reconnectInitialDelayMs;
+					cancelReconnect();
 				}
 				openedConnection.send(GSON.toJson(new AuthMessage(config.apiToken(), username, clientVersion)));
 				log("AutoAuction mod socket opened; sent auth for " + username + " clientVersion=" + clientVersion);
@@ -124,33 +174,21 @@ public final class ModSocketClient implements AutoCloseable {
 			@Override
 			public void onClose() {
 				stopHeartbeat();
-				synchronized (ModSocketClient.this) {
-					if (generation != connectionGeneration) {
-						return;
-					}
-					connection = null;
-					authenticated = false;
-					lastReportedStatus = null;
-					connectedUsername = null;
-					connectingUsername = null;
-				}
 				log("AutoAuction mod socket closed by remote");
+				handleUnexpectedDisconnect(generation);
 			}
 
 			@Override
 			public void onError(Throwable error) {
 				stopHeartbeat();
-				synchronized (ModSocketClient.this) {
-					if (generation != connectionGeneration) {
-						return;
-					}
-					connection = null;
-					authenticated = false;
-					lastReportedStatus = null;
-					connectedUsername = null;
-					connectingUsername = null;
-				}
 				log("AutoAuction mod socket error: " + error.getMessage());
+				handleUnexpectedDisconnect(generation);
+			}
+		});
+		connectionFuture.whenComplete((ignored, error) -> {
+			if (error != null) {
+				log("AutoAuction mod socket connect failed: " + error.getMessage());
+				handleUnexpectedDisconnect(generation);
 			}
 		});
 		return true;
@@ -168,6 +206,9 @@ public final class ModSocketClient implements AutoCloseable {
 		if (connection == null && Objects.equals(connectingUsername, cleanUsername)) {
 			return false;
 		}
+		if (connection == null && reconnectTask != null && !reconnectTask.isCancelled() && Objects.equals(desiredUsername, cleanUsername)) {
+			return false;
+		}
 		if (connection != null) {
 			closeCurrentConnection();
 		}
@@ -183,7 +224,7 @@ public final class ModSocketClient implements AutoCloseable {
 		String type = message.get("type").getAsString();
 		log("AutoAuction mod socket received " + type);
 		if (Objects.equals(type, "auth_ok")) {
-			sendStatus("active");
+			sendDesiredStatus();
 			startHeartbeat();
 			return;
 		}
@@ -318,13 +359,21 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean reportStatus(String status) {
-		if (!authenticated || Objects.equals(lastReportedStatus, status)) {
+		String cleanStatus = String.valueOf(status == null ? "" : status).trim();
+		if (cleanStatus.isBlank()) {
 			return false;
 		}
-		return sendStatus(status);
+		desiredStatus = cleanStatus;
+		desiredBanDetails = null;
+		if (!authenticated || Objects.equals(lastReportedStatus, cleanStatus)) {
+			return false;
+		}
+		return sendStatus(cleanStatus);
 	}
 
 	public synchronized boolean reportBan(ModAccountStatusDetector.BanDetails details) {
+		desiredStatus = "banned";
+		desiredBanDetails = details;
 		if (!authenticated || Objects.equals(lastReportedStatus, "banned")) {
 			return false;
 		}
@@ -427,6 +476,13 @@ public final class ModSocketClient implements AutoCloseable {
 		return true;
 	}
 
+	private synchronized boolean sendDesiredStatus() {
+		if (Objects.equals(desiredStatus, "banned") && desiredBanDetails != null) {
+			return sendBan(desiredBanDetails);
+		}
+		return sendStatus(String.valueOf(desiredStatus == null || desiredStatus.isBlank() ? "active" : desiredStatus));
+	}
+
 	private synchronized boolean sendBan(ModAccountStatusDetector.BanDetails details) {
 		if (connection == null) {
 			return false;
@@ -480,14 +536,60 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 	}
 
+	private synchronized void handleUnexpectedDisconnect(long generation) {
+		if (generation != connectionGeneration) {
+			return;
+		}
+		connection = null;
+		authenticated = false;
+		connectedUsername = null;
+		connectingUsername = null;
+		scheduleReconnect();
+	}
+
+	private synchronized void scheduleReconnect() {
+		if (closed || desiredUsername == null || desiredUsername.isBlank()) {
+			return;
+		}
+		if (reconnectTask != null && !reconnectTask.isCancelled()) {
+			return;
+		}
+		long delay = reconnectDelayMs;
+		reconnectDelayMs = Math.min(reconnectMaxDelayMs, reconnectDelayMs * 2);
+		log("AutoAuction mod socket reconnect scheduled in " + delay + "ms");
+		reconnectTask = heartbeatExecutor.schedule(() -> {
+			String username;
+			String clientVersion;
+			synchronized (ModSocketClient.this) {
+				reconnectTask = null;
+				if (closed || connection != null || connectingUsername != null || desiredUsername == null || desiredUsername.isBlank()) {
+					return;
+				}
+				username = desiredUsername;
+				clientVersion = desiredClientVersion;
+			}
+			connectNow(username, clientVersion);
+		}, delay, TimeUnit.MILLISECONDS);
+	}
+
+	private synchronized void cancelReconnect() {
+		if (reconnectTask != null) {
+			reconnectTask.cancel(false);
+			reconnectTask = null;
+		}
+	}
+
 	@Override
 	public synchronized void close() {
+		closed = true;
+		cancelReconnect();
 		closeCurrentConnection();
 		heartbeatExecutor.shutdownNow();
 	}
 
 	private synchronized void closeCurrentConnection() {
 		connectionGeneration++;
+		cancelReconnect();
 		stopHeartbeat();
 		if (connection != null) {
 			if (authenticated) {

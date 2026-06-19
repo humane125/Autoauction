@@ -219,6 +219,58 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void reconnectsAfterRemoteCloseAndResendsLastStatus() throws Exception {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		client.reportStatus("hypixel");
+		transport.closeConnection(0);
+
+		assertTrue(transport.awaitConnectCalls(2));
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"hypixel\"")));
+		assertFalse(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"active\"")));
+		client.close();
+	}
+
+	@Test
+	void reconnectsAfterSocketError() throws Exception {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.error(new IllegalStateException("wifi changed"));
+
+		assertTrue(transport.awaitConnectCalls(2));
+		client.close();
+	}
+
+	@Test
+	void tickEnsureDoesNotBypassScheduledReconnectBackoff() throws Exception {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.ensureStartedFor("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.error(new IllegalStateException("wifi changed"));
+		client.ensureStartedFor("SocketPlayer", "26.1.1");
+		client.ensureStartedFor("SocketPlayer", "26.1.1");
+
+		assertEquals(1, transport.connectCalls);
+		assertTrue(transport.awaitConnectCalls(2));
+		client.close();
+	}
+
+	@Test
 	void doesNotConnectWithoutApiToken() {
 		FakeTransport transport = new FakeTransport();
 		ModSocketClient client = new ModSocketClient(AutoAuctionConfig.defaults(), transport, 1);
@@ -422,6 +474,9 @@ class ModSocketClientTest {
 			this.listener = listener;
 			this.listeners.add(listener);
 			this.connectCalls++;
+			synchronized (this) {
+				notifyAll();
+			}
 			return CompletableFuture.completedFuture(connection);
 		}
 
@@ -439,6 +494,17 @@ class ModSocketClientTest {
 
 		void closeConnection(int index) {
 			listeners.get(index).onClose();
+		}
+
+		synchronized boolean awaitConnectCalls(int expected) throws InterruptedException {
+			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+			while (System.nanoTime() < deadline) {
+				if (connectCalls >= expected) {
+					return true;
+				}
+				TimeUnit.MILLISECONDS.timedWait(this, 10);
+			}
+			return connectCalls >= expected;
 		}
 	}
 

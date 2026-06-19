@@ -51,6 +51,7 @@ Target examples support suffixes such as `k`, `m`, and `b`.
 
 - AutoAuction websocket connects to `<apiBaseUrl>/api/mod/ws`, converting `https://` to `wss://`.
 - Current expected socket URL is `wss://humane-hypixel.duckdns.org/api/mod/ws`.
+- AutoAuction websocket reconnects after unexpected close/error with backoff and resends the last desired account status after `auth_ok`.
 - Start/stop macro commands are client-side mod commands.
 - Before taking off armor, the mod sends `/is` and waits 5.5 seconds.
 - If inventory has no empty slot, the mod opens `/bz`, clicks sell-inventory flow, confirms, then retries.
@@ -79,8 +80,8 @@ Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\moham\AppData\Roaming\Pri
 
 ## Next Work
 
-1. Add websocket reconnect/backoff and resend current status after reconnect.
-2. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
-3. Add configurable transfer quantity, max cycles, margin threshold, and safety controls.
-4. Continue testing Bazaar product ID resolution with more item families.
+1. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
+2. Add configurable transfer quantity, max cycles, margin threshold, and safety controls.
+3. Continue testing Bazaar product ID resolution with more item families.
+4. Add dashboard visibility for reconnects and live transfer session state.
 5. Commit any future runtime-flow changes immediately after verification.
