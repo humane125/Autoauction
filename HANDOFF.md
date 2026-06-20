@@ -1,8 +1,8 @@
 # AutoAuction Handoff
 
-Date: 2026-06-19
+Date: 2026-06-20
 Branch: `main`
-Latest local commit before this handoff: `f127306 Add Prism account import fallback`
+Latest local commit before this handoff: `e06605d Handle instant buy warning after confirm`
 
 ## Current Setup
 
@@ -35,6 +35,13 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
 - The current EC parking slice only moves full stacks. It does not split partial stacks or select exact custom item counts from inventory.
 - Sender instant-sell now left-clicks `Sell Instantly` once. EC parking is what makes the inventory safe, so no instant-sell amount screen is used.
 - If the optional instant-sell warning appears, sender waits 6 seconds, confirms, and closes Bazaar.
+- Sender instant-buy uses the two-step custom amount flow:
+  - Click `Buy Instantly`.
+  - Click the amount-screen `Custom Amount` slot 16.
+  - Type the quantity on the sign.
+  - On `Confirm Instant Buy`, click slot 13.
+  - If the same `Confirm` warning screen appears, wait 6 seconds and click `WARNING` slot 13.
+  - Wait for the Bazaar bought chat before notifying the receiver.
 - Transfer debug messages were made clearer with workflow, state, item, quantity, and delay details.
 - Bazaar estimate math was fixed: Hypixel `quick_status.sellPrice` is the receiver buy cost side and `quick_status.buyPrice` is the receiver sell revenue side.
 - Bazaar product ID resolution was hardened:
@@ -42,7 +49,7 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
   - Aliases for known mismatches such as `NETHER_WART_DISTILLATE -> NETHER_STALK_DISTILLATE`.
   - Ordered-token fallback for cases like `Glowstone Distillate -> GLOWSTONE_DUST_DISTILLATE`.
   - Ambiguous matches do not guess.
-- Latest jars were copied to both listed Prism mod folders after build.
+- Latest jars were copied to all three listed Prism mod folders after build.
 - The 26.1.2 Prism runtime configs were manually updated to `https://humane-hypixel.duckdns.org`.
 
 ## Current Transfer Commands
@@ -80,6 +87,7 @@ Latest local verification before this handoff:
 ```
 
 All passed. The full build produced `autoauction-1.0.0.jar` and it was copied to all three active Prism instances.
+Latest copied jar SHA-256 was `F6C7DFA3383880E229A891C358922A93510AF25707E20F2495C47CBAED8EA8A4`.
 
 ## Build And Copy
 
