@@ -56,7 +56,7 @@ class TransferControllerTest {
 			"ENCHANTED DIAMOND"
 		));
 
-		assertEquals("AutoAuction transfer invite from SenderPlayer for ENCHANTED DIAMOND. Run /autoauction transfer accept SenderPlayer or /autoauction transfer decline SenderPlayer.", invite);
+		assertEquals("AutoAuction transfer invite from SenderPlayer for ENCHANTED DIAMOND. Run /mf accept SenderPlayer or /mf decline SenderPlayer.", invite);
 		assertEquals(TransferController.State.INCOMING_INVITE, controller.state());
 		assertTrue(controller.canAcceptFrom("SenderPlayer"));
 		assertFalse(controller.canAcceptFrom("OtherPlayer"));

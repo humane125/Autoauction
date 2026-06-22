@@ -33,6 +33,7 @@ import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
 import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
@@ -710,7 +711,15 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void registerCommands() {
-		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(literal("autoauction")
+		ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+			dispatcher.register(autoauctionCommand());
+			dispatcher.register(autoauctionTestCommand());
+			dispatcher.register(moneyTransferCommand());
+		});
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> autoauctionCommand() {
+		return literal(AutoauctionCommandLayout.MAIN_ROOT)
 			.then(literal("start").executes(context -> {
 				controller.start();
 				workflowStarted = false;
@@ -737,7 +746,11 @@ public class AutoauctionClient implements ClientModInitializer {
 					sendFeedback(context.getSource(), line);
 				}
 				return 1;
-			}))
+			}));
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> autoauctionTestCommand() {
+		return literal(AutoauctionCommandLayout.TEST_ROOT)
 			.then(literal("testtrigger").executes(context -> {
 				workflowStarted = true;
 				priceArmorAsync(TestArmorSnapshots.finalDestinationSet(config.killThreshold()),
@@ -771,81 +784,83 @@ public class AutoauctionClient implements ClientModInitializer {
 				DumpCounts counts = dumpScoreboardAndTabList(context.getSource().getClient());
 				sendFeedback(context.getSource(), "AutoAuction dumped scoreboard=" + counts.scoreboardLines() + " tablist=" + counts.tabListLines() + " to latest.log.");
 				return 1;
+			}));
+	}
+
+	private LiteralArgumentBuilder<FabricClientCommandSource> moneyTransferCommand() {
+		return literal(AutoauctionCommandLayout.TRANSFER_ROOT)
+			.then(literal("list").executes(context -> {
+				if (!modSocketClient.requestTransferAccounts()) {
+					sendFeedback(context.getSource(), "AutoAuction transfer list failed: mod socket is not connected yet.");
+					return 0;
+				}
+				sendFeedback(context.getSource(), "AutoAuction transfer account list requested.");
+				return 1;
 			}))
-			.then(literal("transfer")
-				.then(literal("list").executes(context -> {
-					if (!modSocketClient.requestTransferAccounts()) {
-						sendFeedback(context.getSource(), "AutoAuction transfer list failed: mod socket is not connected yet.");
+			.then(literal("accept")
+				.then(argument("senderUsername", StringArgumentType.word())
+					.suggests((context, builder) -> suggestPendingTransferSenders(builder))
+					.executes(context -> {
+					String senderUsername = StringArgumentType.getString(context, "senderUsername");
+					if (!transferController.canAcceptFrom(senderUsername)) {
+						sendFeedback(context.getSource(), "AutoAuction transfer accept failed: no pending invite from " + senderUsername + ".");
 						return 0;
 					}
-					sendFeedback(context.getSource(), "AutoAuction transfer account list requested.");
-					return 1;
-				}))
-				.then(literal("accept")
-					.then(argument("senderUsername", StringArgumentType.word())
-						.suggests((context, builder) -> suggestPendingTransferSenders(builder))
-						.executes(context -> {
-						String senderUsername = StringArgumentType.getString(context, "senderUsername");
-						if (!transferController.canAcceptFrom(senderUsername)) {
-							sendFeedback(context.getSource(), "AutoAuction transfer accept failed: no pending invite from " + senderUsername + ".");
-							return 0;
-						}
-						if (!modSocketClient.acceptTransfer(senderUsername)) {
-							sendFeedback(context.getSource(), "AutoAuction transfer accept failed: mod socket is not connected yet.");
-							return 0;
-						}
-						sendFeedback(context.getSource(), "AutoAuction transfer accept sent for " + senderUsername + ".");
-						return 1;
-					})))
-				.then(literal("decline")
-					.then(argument("senderUsername", StringArgumentType.word())
-						.suggests((context, builder) -> suggestPendingTransferSenders(builder))
-						.executes(context -> {
-						String senderUsername = StringArgumentType.getString(context, "senderUsername");
-						if (!modSocketClient.declineTransfer(senderUsername)) {
-							sendFeedback(context.getSource(), "AutoAuction transfer decline failed: mod socket is not connected yet.");
-							return 0;
-						}
-						sendFeedback(context.getSource(), "AutoAuction transfer decline sent for " + senderUsername + ".");
-						return 1;
-					})))
-				.then(literal("run")
-					.executes(context -> runTransferCommand(context.getSource(), OptionalLong.empty()))
-					.then(argument("targetCoins", StringArgumentType.word()).executes(context -> {
-						OptionalLong targetCoins = CoinAmountParser.parse(StringArgumentType.getString(context, "targetCoins"));
-						if (targetCoins.isEmpty()) {
-							sendFeedback(context.getSource(), "AutoAuction transfer run failed: target must be a positive coin amount like 200m, 2.5m, or 200000000.");
-							return 0;
-						}
-						return runTransferCommand(context.getSource(), targetCoins);
-					})))
-				.then(literal("cancel").executes(context -> {
-					if (!modSocketClient.cancelTransfer()) {
-						sendFeedback(context.getSource(), "AutoAuction transfer cancel failed: mod socket is not connected yet.");
+					if (!modSocketClient.acceptTransfer(senderUsername)) {
+						sendFeedback(context.getSource(), "AutoAuction transfer accept failed: mod socket is not connected yet.");
 						return 0;
 					}
-					sendFeedback(context.getSource(), "AutoAuction transfer cancel sent.");
+					sendFeedback(context.getSource(), "AutoAuction transfer accept sent for " + senderUsername + ".");
 					return 1;
-				}))
-				.then(argument("receiverUsername", StringArgumentType.word())
-					.suggests((context, builder) -> suggestTransferReceivers(builder))
-					.then(argument("itemName", StringArgumentType.greedyString())
-						.suggests((context, builder) -> suggestTransferItems(builder))
-						.executes(context -> {
-						String receiverUsername = StringArgumentType.getString(context, "receiverUsername");
-						String itemName = StringArgumentType.getString(context, "itemName").trim();
-						if (itemName.isBlank()) {
-							sendFeedback(context.getSource(), "AutoAuction transfer invite failed: item name is required.");
-							return 0;
-						}
-						if (!modSocketClient.inviteTransfer(receiverUsername, itemName)) {
-							sendFeedback(context.getSource(), "AutoAuction transfer invite failed: mod socket is not connected yet.");
-							return 0;
-						}
-						sendFeedback(context.getSource(), "AutoAuction transfer invite requested for " + receiverUsername + " using " + itemName + ".");
-						return 1;
-					}))))
-		));
+				})))
+			.then(literal("decline")
+				.then(argument("senderUsername", StringArgumentType.word())
+					.suggests((context, builder) -> suggestPendingTransferSenders(builder))
+					.executes(context -> {
+					String senderUsername = StringArgumentType.getString(context, "senderUsername");
+					if (!modSocketClient.declineTransfer(senderUsername)) {
+						sendFeedback(context.getSource(), "AutoAuction transfer decline failed: mod socket is not connected yet.");
+						return 0;
+					}
+					sendFeedback(context.getSource(), "AutoAuction transfer decline sent for " + senderUsername + ".");
+					return 1;
+				})))
+			.then(literal("run")
+				.executes(context -> runTransferCommand(context.getSource(), OptionalLong.empty()))
+				.then(argument("targetCoins", StringArgumentType.word()).executes(context -> {
+					OptionalLong targetCoins = CoinAmountParser.parse(StringArgumentType.getString(context, "targetCoins"));
+					if (targetCoins.isEmpty()) {
+						sendFeedback(context.getSource(), "AutoAuction transfer run failed: target must be a positive coin amount like 200m, 2.5m, or 200000000.");
+						return 0;
+					}
+					return runTransferCommand(context.getSource(), targetCoins);
+				})))
+			.then(literal("cancel").executes(context -> {
+				if (!modSocketClient.cancelTransfer()) {
+					sendFeedback(context.getSource(), "AutoAuction transfer cancel failed: mod socket is not connected yet.");
+					return 0;
+				}
+				sendFeedback(context.getSource(), "AutoAuction transfer cancel sent.");
+				return 1;
+			}))
+			.then(argument("receiverUsername", StringArgumentType.word())
+				.suggests((context, builder) -> suggestTransferReceivers(builder))
+				.then(argument("itemName", StringArgumentType.greedyString())
+					.suggests((context, builder) -> suggestTransferItems(builder))
+					.executes(context -> {
+					String receiverUsername = StringArgumentType.getString(context, "receiverUsername");
+					String itemName = StringArgumentType.getString(context, "itemName").trim();
+					if (itemName.isBlank()) {
+						sendFeedback(context.getSource(), "AutoAuction transfer invite failed: item name is required.");
+						return 0;
+					}
+					if (!modSocketClient.inviteTransfer(receiverUsername, itemName)) {
+						sendFeedback(context.getSource(), "AutoAuction transfer invite failed: mod socket is not connected yet.");
+						return 0;
+					}
+					sendFeedback(context.getSource(), "AutoAuction transfer invite requested for " + receiverUsername + " using " + itemName + ".");
+					return 1;
+				})));
 	}
 
 	private CompletableFuture<Suggestions> suggestTransferReceivers(SuggestionsBuilder builder) {

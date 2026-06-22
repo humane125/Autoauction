@@ -29,8 +29,8 @@ public final class TransferController {
 		this.role = Role.RECEIVER;
 		this.state = State.INCOMING_INVITE;
 		return "AutoAuction transfer invite from " + nextSession.senderUsername() + " for " + nextSession.itemName()
-			+ ". Run /autoauction transfer accept " + nextSession.senderUsername()
-			+ " or /autoauction transfer decline " + nextSession.senderUsername() + ".";
+			+ ". Run /mf accept " + nextSession.senderUsername()
+			+ " or /mf decline " + nextSession.senderUsername() + ".";
 	}
 
 	public String outgoingPending(Session nextSession) {
