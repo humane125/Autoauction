@@ -28,6 +28,7 @@ import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.EnderChestParkingPlan;
 import com.autoauction.client.transfer.HypixelBazaarClient;
 import com.autoauction.client.transfer.TransferAccountListRequests;
+import com.autoauction.client.transfer.TransferChatComponents;
 import com.autoauction.client.transfer.TransferCommandSuggestions;
 import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
@@ -687,7 +688,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			for (String message : messages) {
-				client.player.sendSystemMessage(Component.literal(message));
+				client.player.sendSystemMessage(TransferChatComponents.forMessage(message));
 			}
 		});
 	}
