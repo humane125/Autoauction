@@ -8,8 +8,10 @@ public final class TransferController {
 	private State state = State.IDLE;
 	private Session session;
 	private Role role;
+	private List<ConnectedAccount> connectedAccounts = List.of();
 
 	public List<String> showAccounts(List<ConnectedAccount> accounts) {
+		connectedAccounts = accounts == null ? List.of() : List.copyOf(accounts);
 		if (accounts == null || accounts.isEmpty()) {
 			return List.of("AutoAuction transfer: no connected accounts.");
 		}
@@ -98,6 +100,19 @@ public final class TransferController {
 
 	public Session session() {
 		return session;
+	}
+
+	public List<String> connectedAccountUsernames() {
+		return connectedAccounts.stream()
+			.map(ConnectedAccount::minecraftUsername)
+			.toList();
+	}
+
+	public List<String> pendingSenderUsernames() {
+		if (state == State.INCOMING_INVITE && session != null) {
+			return List.of(session.senderUsername());
+		}
+		return connectedAccountUsernames();
 	}
 
 	private void clear() {

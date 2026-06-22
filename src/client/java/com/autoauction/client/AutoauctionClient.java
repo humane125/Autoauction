@@ -27,11 +27,14 @@ import com.autoauction.client.transfer.BazaarTransferEstimate;
 import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.EnderChestParkingPlan;
 import com.autoauction.client.transfer.HypixelBazaarClient;
+import com.autoauction.client.transfer.TransferCommandSuggestions;
 import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
 import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -63,6 +66,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -82,6 +86,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_SELL_WARNING_GRACE_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
+	private static final long TRANSFER_SUGGESTION_REFRESH_MS = 2_000L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -116,6 +121,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private String senderParkedItemName;
 	private int senderParkedStacks;
 	private PendingHandoff pendingHandoff;
+	private long lastTransferSuggestionRefreshAt;
 
 	@Override
 	public void onInitializeClient() {
@@ -770,7 +776,9 @@ public class AutoauctionClient implements ClientModInitializer {
 					return 1;
 				}))
 				.then(literal("accept")
-					.then(argument("senderUsername", StringArgumentType.word()).executes(context -> {
+					.then(argument("senderUsername", StringArgumentType.word())
+						.suggests((context, builder) -> suggestPendingTransferSenders(builder))
+						.executes(context -> {
 						String senderUsername = StringArgumentType.getString(context, "senderUsername");
 						if (!transferController.canAcceptFrom(senderUsername)) {
 							sendFeedback(context.getSource(), "AutoAuction transfer accept failed: no pending invite from " + senderUsername + ".");
@@ -784,7 +792,9 @@ public class AutoauctionClient implements ClientModInitializer {
 						return 1;
 					})))
 				.then(literal("decline")
-					.then(argument("senderUsername", StringArgumentType.word()).executes(context -> {
+					.then(argument("senderUsername", StringArgumentType.word())
+						.suggests((context, builder) -> suggestPendingTransferSenders(builder))
+						.executes(context -> {
 						String senderUsername = StringArgumentType.getString(context, "senderUsername");
 						if (!modSocketClient.declineTransfer(senderUsername)) {
 							sendFeedback(context.getSource(), "AutoAuction transfer decline failed: mod socket is not connected yet.");
@@ -812,7 +822,10 @@ public class AutoauctionClient implements ClientModInitializer {
 					return 1;
 				}))
 				.then(argument("receiverUsername", StringArgumentType.word())
-					.then(argument("itemName", StringArgumentType.greedyString()).executes(context -> {
+					.suggests((context, builder) -> suggestTransferReceivers(builder))
+					.then(argument("itemName", StringArgumentType.greedyString())
+						.suggests((context, builder) -> suggestTransferItems(builder))
+						.executes(context -> {
 						String receiverUsername = StringArgumentType.getString(context, "receiverUsername");
 						String itemName = StringArgumentType.getString(context, "itemName").trim();
 						if (itemName.isBlank()) {
@@ -827,6 +840,41 @@ public class AutoauctionClient implements ClientModInitializer {
 						return 1;
 					}))))
 		));
+	}
+
+	private CompletableFuture<Suggestions> suggestTransferReceivers(SuggestionsBuilder builder) {
+		refreshTransferAccountSuggestions();
+		return suggestStrings(TransferCommandSuggestions.receiverUsernames(transferController.connectedAccountUsernames()), builder);
+	}
+
+	private CompletableFuture<Suggestions> suggestPendingTransferSenders(SuggestionsBuilder builder) {
+		refreshTransferAccountSuggestions();
+		return suggestStrings(TransferCommandSuggestions.receiverUsernames(transferController.pendingSenderUsernames()), builder);
+	}
+
+	private CompletableFuture<Suggestions> suggestTransferItems(SuggestionsBuilder builder) {
+		return suggestStrings(TransferCommandSuggestions.itemNames(), builder);
+	}
+
+	private CompletableFuture<Suggestions> suggestStrings(List<String> values, SuggestionsBuilder builder) {
+		String remaining = builder.getRemaining().toLowerCase(Locale.ROOT);
+		for (String value : values) {
+			if (value.toLowerCase(Locale.ROOT).startsWith(remaining)) {
+				builder.suggest(value);
+			}
+		}
+		return builder.buildFuture();
+	}
+
+	private void refreshTransferAccountSuggestions() {
+		long now = System.currentTimeMillis();
+		if (now - lastTransferSuggestionRefreshAt < TRANSFER_SUGGESTION_REFRESH_MS) {
+			return;
+		}
+		lastTransferSuggestionRefreshAt = now;
+		if (modSocketClient != null) {
+			modSocketClient.requestTransferAccounts();
+		}
 	}
 
 	private int runTransferCommand(FabricClientCommandSource source, OptionalLong targetCoins) {

@@ -33,6 +33,19 @@ class TransferControllerTest {
 	}
 
 	@Test
+	void cachesConnectedAccountUsernamesForCommandSuggestions() {
+		TransferController controller = new TransferController();
+
+		controller.showAccounts(List.of(
+			new TransferController.ConnectedAccount("ReceiverOne", "hypixel"),
+			new TransferController.ConnectedAccount("ReceiverTwo", "active")
+		));
+
+		assertEquals(List.of("ReceiverOne", "ReceiverTwo"), controller.connectedAccountUsernames());
+		assertEquals(List.of("ReceiverOne", "ReceiverTwo"), controller.pendingSenderUsernames());
+	}
+
+	@Test
 	void tracksIncomingInviteUntilAccepted() {
 		TransferController controller = new TransferController();
 
@@ -47,6 +60,7 @@ class TransferControllerTest {
 		assertEquals(TransferController.State.INCOMING_INVITE, controller.state());
 		assertTrue(controller.canAcceptFrom("SenderPlayer"));
 		assertFalse(controller.canAcceptFrom("OtherPlayer"));
+		assertEquals(List.of("SenderPlayer"), controller.pendingSenderUsernames());
 	}
 
 	@Test
