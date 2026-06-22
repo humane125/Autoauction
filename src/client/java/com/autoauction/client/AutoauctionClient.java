@@ -88,7 +88,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_SELL_WARNING_GRACE_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
-	private static final long TRANSFER_SUGGESTION_REFRESH_MS = 2_000L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -124,7 +123,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private String senderParkedItemName;
 	private int senderParkedStacks;
 	private PendingHandoff pendingHandoff;
-	private long lastTransferSuggestionRefreshAt;
 
 	@Override
 	public void onInitializeClient() {
@@ -889,11 +887,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void refreshTransferAccountSuggestions() {
-		long now = System.currentTimeMillis();
-		if (now - lastTransferSuggestionRefreshAt < TRANSFER_SUGGESTION_REFRESH_MS) {
-			return;
-		}
-		lastTransferSuggestionRefreshAt = now;
 		if (modSocketClient != null) {
 			if (modSocketClient.requestTransferAccounts()) {
 				transferAccountListRequests.markSilentRequestSent();
