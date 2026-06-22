@@ -26,6 +26,6 @@ class AutoauctionCommandLayoutTest {
 	@Test
 	void testAndTransferCommandsHaveTheirOwnRoots() {
 		assertEquals(List.of("testtrigger", "testlisting", "dumpslots", "dumpstatus"), AutoauctionCommandLayout.TEST_SUBCOMMANDS);
-		assertEquals(List.of("list", "accept", "decline", "run", "cancel", "<receiverUsername> <itemName>"), AutoauctionCommandLayout.TRANSFER_SUBCOMMANDS);
+		assertEquals(List.of("list", "pair", "accept", "decline", "run", "cancel"), AutoauctionCommandLayout.TRANSFER_SUBCOMMANDS);
 	}
 }

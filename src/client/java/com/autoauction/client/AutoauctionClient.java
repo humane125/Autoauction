@@ -843,24 +843,25 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendFeedback(context.getSource(), "AutoAuction transfer cancel sent.");
 				return 1;
 			}))
-			.then(argument("receiverUsername", StringArgumentType.word())
-				.suggests((context, builder) -> suggestTransferReceivers(builder))
-				.then(argument("itemName", StringArgumentType.greedyString())
-					.suggests((context, builder) -> suggestTransferItems(builder))
-					.executes(context -> {
-					String receiverUsername = StringArgumentType.getString(context, "receiverUsername");
-					String itemName = StringArgumentType.getString(context, "itemName").trim();
-					if (itemName.isBlank()) {
-						sendFeedback(context.getSource(), "AutoAuction transfer invite failed: item name is required.");
-						return 0;
-					}
-					if (!modSocketClient.inviteTransfer(receiverUsername, itemName)) {
-						sendFeedback(context.getSource(), "AutoAuction transfer invite failed: mod socket is not connected yet.");
-						return 0;
-					}
-					sendFeedback(context.getSource(), "AutoAuction transfer invite requested for " + receiverUsername + " using " + itemName + ".");
-					return 1;
-				})));
+			.then(literal("pair")
+				.then(argument("receiverUsername", StringArgumentType.word())
+					.suggests((context, builder) -> suggestTransferReceivers(builder))
+					.then(argument("itemName", StringArgumentType.greedyString())
+						.suggests((context, builder) -> suggestTransferItems(builder))
+						.executes(context -> {
+						String receiverUsername = StringArgumentType.getString(context, "receiverUsername");
+						String itemName = StringArgumentType.getString(context, "itemName").trim();
+						if (itemName.isBlank()) {
+							sendFeedback(context.getSource(), "AutoAuction transfer pair failed: item name is required.");
+							return 0;
+						}
+						if (!modSocketClient.inviteTransfer(receiverUsername, itemName)) {
+							sendFeedback(context.getSource(), "AutoAuction transfer pair failed: mod socket is not connected yet.");
+							return 0;
+						}
+						sendFeedback(context.getSource(), "AutoAuction transfer pair requested for " + receiverUsername + " using " + itemName + ".");
+						return 1;
+					}))));
 	}
 
 	private CompletableFuture<Suggestions> suggestTransferReceivers(SuggestionsBuilder builder) {
