@@ -27,6 +27,7 @@ import com.autoauction.client.transfer.BazaarTransferEstimate;
 import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.EnderChestParkingPlan;
 import com.autoauction.client.transfer.HypixelBazaarClient;
+import com.autoauction.client.transfer.TransferAccountListRequests;
 import com.autoauction.client.transfer.TransferCommandSuggestions;
 import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
@@ -99,6 +100,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ModSocketClient modSocketClient;
 	private TransferController transferController;
 	private final TransferPurseTracker transferPurseTracker = new TransferPurseTracker();
+	private final TransferAccountListRequests transferAccountListRequests = new TransferAccountListRequests();
 	private DiscordNotifier notifier;
 	private AltManagerHandoffClient handoffClient;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
@@ -503,6 +505,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				List<TransferController.ConnectedAccount> connectedAccounts = accounts.stream()
 					.map(account -> new TransferController.ConnectedAccount(account.minecraftUsername(), account.status()))
 					.toList();
+				if (transferAccountListRequests.consumeSilentResponse()) {
+					transferController.showAccounts(connectedAccounts);
+					return;
+				}
 				sendTransferFeedback(transferController.showAccounts(connectedAccounts));
 			}
 
@@ -873,7 +879,9 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		lastTransferSuggestionRefreshAt = now;
 		if (modSocketClient != null) {
-			modSocketClient.requestTransferAccounts();
+			if (modSocketClient.requestTransferAccounts()) {
+				transferAccountListRequests.markSilentRequestSent();
+			}
 		}
 	}
 
