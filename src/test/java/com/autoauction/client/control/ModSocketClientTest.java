@@ -353,6 +353,35 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void invokesRemoteActionHandlerForIncomingRequest() {
+		FakeTransport transport = new FakeTransport();
+		List<ModSocketClient.RemoteAction> actions = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(
+			config,
+			transport,
+			30_000,
+			message -> {},
+			reason -> {},
+			ModSocketClient.TransferHandler.NOOP,
+			ModSocketClient.ScreenshotHandler.NOOP,
+			actions::add
+		);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		transport.message("{\"type\":\"remote_action\",\"accountId\":12,\"requestId\":\"action-123\",\"actionType\":\"client_command\",\"content\":\"autoauction\"}");
+
+		assertEquals(1, actions.size());
+		assertEquals(12, actions.getFirst().accountId());
+		assertEquals("action-123", actions.getFirst().requestId());
+		assertEquals("client_command", actions.getFirst().actionType());
+		assertEquals("autoauction", actions.getFirst().content());
+		client.close();
+	}
+
+	@Test
 	void sendsScreenshotAndClientLogPayloadsAfterAuthOkWithoutLeakingSecrets() {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_secret_remote_key");

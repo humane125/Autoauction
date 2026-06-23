@@ -62,6 +62,15 @@ public final class MinecraftGameActions {
 		client.player.connection.sendCommand(normalized);
 	}
 
+	public void sendChatMessage(Minecraft client, String message) {
+		String normalized = String.valueOf(message == null ? "" : message).trim();
+		if (client.player == null || normalized.isBlank()) {
+			return;
+		}
+
+		client.player.connection.sendChat(normalized);
+	}
+
 	public boolean sendClientCommand(Minecraft client, String command) {
 		String normalized = normalizedCommand(command);
 		if (normalized.isBlank() || client.getConnection() == null) {

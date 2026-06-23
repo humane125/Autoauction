@@ -142,7 +142,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.actions = new MinecraftGameActions();
 			this.apiClient = new AuctionApiClient(config);
 			this.transferController = new TransferController();
-			this.modSocketClient = new ModSocketClient(config, this::disconnectFromRemoteCommand, transferSocketHandler(), this::handleRemoteScreenshotRequest);
+			this.modSocketClient = new ModSocketClient(
+				config,
+				this::disconnectFromRemoteCommand,
+				transferSocketHandler(),
+				this::handleRemoteScreenshotRequest,
+				this::handleRemoteActionRequest
+			);
 			this.notifier = new DiscordNotifier(config);
 			this.handoffClient = new AltManagerHandoffClient();
 			registerCommands();
@@ -284,6 +290,69 @@ public class AutoauctionClient implements ClientModInitializer {
 				actions.disconnect(client, disconnectReason);
 			}
 		});
+	}
+
+	private void handleRemoteActionRequest(ModSocketClient.RemoteAction request) {
+		Minecraft client = Minecraft.getInstance();
+		client.execute(() -> {
+			if (modSocketClient == null || actions == null || client.player == null) {
+				sendRemoteClientLog("warn", "Remote action skipped: Minecraft player is not ready");
+				return;
+			}
+			String actionType = String.valueOf(request.actionType() == null ? "" : request.actionType()).trim().toLowerCase(Locale.ROOT);
+			String content = String.valueOf(request.content() == null ? "" : request.content()).trim();
+			if (content.isBlank()) {
+				sendRemoteClientLog("warn", "Remote action skipped: empty message");
+				return;
+			}
+
+			try {
+				switch (actionType) {
+					case "client_command" -> sendRemoteClientCommand(client, content);
+					case "server_command" -> sendRemoteServerCommand(client, content);
+					case "text_message" -> {
+						actions.sendChatMessage(client, content);
+						sendRemoteClientLog("info", "Remote chat message sent");
+					}
+					default -> sendRemoteClientLog("warn", "Remote action skipped: unknown action type " + actionType);
+				}
+			} catch (RuntimeException error) {
+				Autoauction.LOGGER.warn("AutoAuction remote action failed", error);
+				sendRemoteClientLog("error", "Remote action failed: " + error.getMessage());
+			}
+		});
+	}
+
+	private void sendRemoteClientCommand(Minecraft client, String content) {
+		String command = normalizedRemoteCommand(content);
+		if (command.isBlank()) {
+			sendRemoteClientLog("warn", "Remote client command skipped: empty command");
+			return;
+		}
+		boolean handled = actions.sendClientCommand(client, command);
+		if (handled) {
+			sendRemoteClientLog("info", "Remote client command sent: /" + command);
+		} else {
+			sendRemoteClientLog("warn", "Remote client command was not handled: /" + command);
+		}
+	}
+
+	private void sendRemoteServerCommand(Minecraft client, String content) {
+		String command = normalizedRemoteCommand(content);
+		if (command.isBlank()) {
+			sendRemoteClientLog("warn", "Remote server command skipped: empty command");
+			return;
+		}
+		actions.sendChatCommand(client, command);
+		sendRemoteClientLog("info", "Remote server command sent: /" + command);
+	}
+
+	private String normalizedRemoteCommand(String content) {
+		String command = String.valueOf(content == null ? "" : content).trim();
+		while (command.startsWith("/") || command.startsWith(".")) {
+			command = command.substring(1).trim();
+		}
+		return command;
 	}
 
 	private void handleRemoteScreenshotRequest(ModSocketClient.ScreenshotRequest request) {
