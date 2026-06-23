@@ -57,8 +57,6 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
-import net.minecraft.network.chat.TextColor;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
@@ -479,14 +477,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void registerMessageHandlers() {
-		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-			sendRemoteChatLog(message)
-		);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			String text = message.getString();
-			if (!overlay) {
-				sendRemoteChatLog(message);
-			}
 			if (AuctionBlockedMessageDetector.isCookieBuffRequired(text)) {
 				handleCookieBuffRequired();
 			}
@@ -762,69 +754,6 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (modSocketClient != null && !modSocketClient.sendClientLog(level, "system", message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
 		}
-	}
-
-	private void sendRemoteChatLog(String message) {
-		if (modSocketClient != null && !modSocketClient.sendClientLog("info", "chat", message)) {
-			Autoauction.LOGGER.debug("AutoAuction remote chat log skipped: {}", message);
-		}
-	}
-
-	private void sendRemoteChatLog(Component message) {
-		List<ModSocketClient.RemoteLogSegment> segments = remoteLogSegments(message);
-		String plainMessage = message.getString();
-		if (modSocketClient != null && !modSocketClient.sendClientLog("info", "chat", plainMessage, segments)) {
-			Autoauction.LOGGER.debug("AutoAuction remote chat log skipped: {}", plainMessage);
-		}
-	}
-
-	private List<ModSocketClient.RemoteLogSegment> remoteLogSegments(Component message) {
-		List<ModSocketClient.RemoteLogSegment> segments = new ArrayList<>();
-		StringBuilder text = new StringBuilder();
-		Style[] currentStyle = new Style[] { null };
-		message.getVisualOrderText().accept((index, style, codePoint) -> {
-			if (currentStyle[0] != null && !sameRemoteLogStyle(currentStyle[0], style)) {
-				appendRemoteLogSegment(segments, text, currentStyle[0]);
-				text.setLength(0);
-			}
-			currentStyle[0] = style;
-			text.appendCodePoint(codePoint);
-			return true;
-		});
-		if (currentStyle[0] != null) {
-			appendRemoteLogSegment(segments, text, currentStyle[0]);
-		}
-		return segments;
-	}
-
-	private void appendRemoteLogSegment(List<ModSocketClient.RemoteLogSegment> segments, StringBuilder text, Style style) {
-		if (text.isEmpty()) {
-			return;
-		}
-		segments.add(new ModSocketClient.RemoteLogSegment(
-			text.toString(),
-			remoteLogColor(style),
-			style.isBold(),
-			style.isItalic(),
-			style.isUnderlined(),
-			style.isStrikethrough()
-		));
-	}
-
-	private boolean sameRemoteLogStyle(Style left, Style right) {
-		return java.util.Objects.equals(remoteLogColor(left), remoteLogColor(right))
-			&& left.isBold() == right.isBold()
-			&& left.isItalic() == right.isItalic()
-			&& left.isUnderlined() == right.isUnderlined()
-			&& left.isStrikethrough() == right.isStrikethrough();
-	}
-
-	private String remoteLogColor(Style style) {
-		TextColor color = style.getColor();
-		if (color == null) {
-			return null;
-		}
-		return String.format("#%06X", color.getValue() & 0xFFFFFF);
 	}
 
 	private void handleDumpSlotsHotkey(Minecraft client) {

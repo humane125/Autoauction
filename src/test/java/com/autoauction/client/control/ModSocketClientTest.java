@@ -365,7 +365,7 @@ class ModSocketClientTest {
 		assertTrue(client.sendClientScreenshot("image/png", "abc123", "2026-06-23T12:00:00Z"));
 		assertTrue(client.sendClientLog(
 			"warn",
-			"chat",
+			"system",
 			"Transfer ready hpx_secret_remote_key \u00a7aGREEN",
 			List.of(
 				new ModSocketClient.RemoteLogSegment("Transfer  ", "#55FF55", true, false, false, false),
@@ -386,7 +386,7 @@ class ModSocketClientTest {
 			.findFirst()
 			.orElseThrow();
 		assertTrue(logPayload.contains("\"level\":\"warn\""));
-		assertTrue(logPayload.contains("\"source\":\"chat\""));
+		assertTrue(logPayload.contains("\"source\":\"system\""));
 		assertTrue(logPayload.contains("\"message\":\"Transfer ready [redacted] GREEN\""));
 		assertTrue(logPayload.contains("\"segments\""));
 		assertTrue(logPayload.contains("\"text\":\"Transfer  \""));
