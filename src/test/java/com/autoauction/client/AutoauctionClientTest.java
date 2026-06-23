@@ -28,6 +28,24 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void realArmorListingUsesFixedPriceWithoutRecommendations() {
+		EnumMap<ArmorPiece, ArmorSnapshot> armor = new EnumMap<>(ArmorPiece.class);
+		EnumMap<ArmorPiece, String> inventoryNames = new EnumMap<>(ArmorPiece.class);
+		for (ArmorPiece piece : ArmorPiece.values()) {
+			armor.put(piece, new ArmorSnapshot(piece, piece.baseName(), piece.baseName(), 25_000, false, 0));
+			inventoryNames.put(piece, "Equipped " + piece.baseName());
+		}
+
+		var pricedArmor = AutoauctionClient.realListingPrices(armor, inventoryNames).join();
+
+		assertEquals(ArmorPiece.values().length, pricedArmor.size());
+		for (AutoauctionClient.PricedArmor item : pricedArmor) {
+			assertEquals(24_999_000, item.price());
+			assertEquals(inventoryNames.get(item.armor().piece()), item.inventoryItemName());
+		}
+	}
+
+	@Test
 	void clickDelayHasHardMinimumOfFourHundredMs() {
 		assertEquals(400, AutoauctionClient.effectiveClickDelayMs(0));
 		assertEquals(400, AutoauctionClient.effectiveClickDelayMs(250));

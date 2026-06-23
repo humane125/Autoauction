@@ -87,6 +87,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
 public class AutoauctionClient implements ClientModInitializer {
 	private static final int TEST_LISTING_PRICE = 2_500_000;
+	private static final int REAL_ARMOR_LISTING_PRICE = 24_999_000;
 	private static final int MIN_CLICK_DELAY_MS = 400;
 	private static final long PROXY_READY_RECONNECT_DELAY_MS = 1_500L;
 	private static final long HYPIXEL_READY_MACRO_DELAY_MS = 500L;
@@ -1489,7 +1490,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startRealWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor) {
-		CompletableFuture<List<PricedArmor>> prices = priceArmorForRealAsync(armor, defaultInventoryNames(armor));
+		CompletableFuture<List<PricedArmor>> prices = realListingPrices(armor, defaultInventoryNames(armor));
 		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(armor.values()), prices);
 		realWorkflow.start(client);
 	}
@@ -1525,14 +1526,30 @@ public class AutoauctionClient implements ClientModInitializer {
 		EnumMap<ArmorPiece, ArmorSnapshot> armor,
 		EnumMap<ArmorPiece, String> inventoryNames
 	) {
+		return fixedListingPrices(armor, inventoryNames, TEST_LISTING_PRICE);
+	}
+
+	static CompletableFuture<List<PricedArmor>> realListingPrices(
+		EnumMap<ArmorPiece, ArmorSnapshot> armor,
+		EnumMap<ArmorPiece, String> inventoryNames
+	) {
+		return fixedListingPrices(armor, inventoryNames, REAL_ARMOR_LISTING_PRICE);
+	}
+
+	private static CompletableFuture<List<PricedArmor>> fixedListingPrices(
+		EnumMap<ArmorPiece, ArmorSnapshot> armor,
+		EnumMap<ArmorPiece, String> inventoryNames,
+		int price
+	) {
 		List<PricedArmor> priced = new ArrayList<>();
 		for (ArmorPiece piece : ArmorPiece.values()) {
 			ArmorSnapshot snapshot = armor.get(piece);
 			String inventoryName = inventoryNames.get(piece);
 			if (snapshot == null || inventoryName == null || inventoryName.isBlank()) {
-				throw new IllegalStateException("missing armor test data for " + piece);
+				throw new IllegalStateException("missing armor listing data for " + piece);
 			}
-			priced.add(new PricedArmor(snapshot, inventoryName, TEST_LISTING_PRICE));
+			Autoauction.LOGGER.info("AutoAuction fixed listing price for {} at {}", snapshot.baseName(), price);
+			priced.add(new PricedArmor(snapshot, inventoryName, price));
 		}
 		return CompletableFuture.completedFuture(priced);
 	}
@@ -1559,31 +1576,6 @@ public class AutoauctionClient implements ClientModInitializer {
 			names.put(entry.getKey(), entry.getValue().baseName());
 		}
 		return names;
-	}
-
-	private CompletableFuture<List<PricedArmor>> priceArmorForRealAsync(
-		EnumMap<ArmorPiece, ArmorSnapshot> armor,
-		EnumMap<ArmorPiece, String> inventoryNames
-	) {
-		return CompletableFuture.supplyAsync(() -> {
-			try {
-				List<PricedArmor> priced = new ArrayList<>();
-				for (ArmorPiece piece : ArmorPiece.values()) {
-					ArmorSnapshot snapshot = armor.get(piece);
-					String inventoryName = inventoryNames.get(piece);
-					if (snapshot == null || inventoryName == null || inventoryName.isBlank()) {
-						throw new IllegalStateException("missing armor test data for " + piece);
-					}
-					var response = apiClient.recommend(requestFactory.fromArmor(snapshot, config.killThreshold()));
-					int price = response.recommendedPrice();
-					Autoauction.LOGGER.info("AutoAuction priced {} at {}", snapshot.baseName(), price);
-					priced.add(new PricedArmor(snapshot, inventoryName, price));
-				}
-				return priced;
-			} catch (Exception e) {
-				throw new IllegalStateException("pricing workflow failed: " + e.getMessage(), e);
-			}
-		});
 	}
 
 	private void notifyIssueAsync(String message) {
@@ -3145,7 +3137,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					pricedArmor = pricesFuture.join();
 					for (PricedArmor item : pricedArmor) {
-						debug(client, "Recommended price for " + item.inventoryItemName() + ": "
+						debug(client, "Listing price for " + item.inventoryItemName() + ": "
 							+ PriceTextFormatter.forSign(item.price()) + " (" + item.price() + " coins)");
 					}
 					transition(RealAuctionState.OPEN_AH, client);
@@ -3274,7 +3266,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case SUBMIT_PRICE_SIGN -> {
 					String priceText = PriceTextFormatter.forSign(currentItem().price());
-					debug(client, "Typing recommended price: " + priceText + " (" + currentItem().price() + " coins).");
+					debug(client, "Typing listing price: " + priceText + " (" + currentItem().price() + " coins).");
 					actions.submitSignText(client, priceText);
 					transition(RealAuctionState.WAIT_PRICE_APPLIED, client);
 				}
