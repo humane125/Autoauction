@@ -1,8 +1,8 @@
 # AutoAuction Handoff
 
-Date: 2026-06-20
+Date: 2026-06-23
 Branch: `main`
-Latest local commit before this handoff: `e06605d Handle instant buy warning after confirm`
+Latest local commit before this handoff: `2373905 Restore inline transfer chat buttons`
 
 ## Current Setup
 
@@ -51,6 +51,14 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
   - Ambiguous matches do not guess.
 - Latest jars were copied to all three listed Prism mod folders after build.
 - The 26.1.2 Prism runtime configs were manually updated to `https://humane-hypixel.duckdns.org`.
+- API/dashboard remote-control shell is now deployed on the RDP:
+  - Dashboard `Connect` opens `/remote/<minecraft_uuid>`.
+  - Manual `/remote/<username>` and UUID-without-dashes routes also resolve.
+  - Dashboard can request screenshots over `/api/dashboard/ws`.
+  - API relays screenshot requests to the connected mod socket as `request_screenshot`.
+  - API accepts `client_screenshot` and `client_log` from the mod.
+  - Dashboard shows screenshot state and in-game/client logs on the remote-control page.
+- The API repo latest deployed commit for this handoff is `86acad0 Use account keys for remote control routes`.
 
 ## Current Transfer Commands
 
@@ -75,6 +83,54 @@ Target examples support suffixes such as `k`, `m`, and `b`.
 - After armor listing, AutoAuction asks Alt Manager for account switch/proxy handoff, waits for proxy readiness, waits 1.5 seconds, reconnects to Hypixel, waits for player/server availability, waits 0.5 seconds, then can run the macro start command.
 - Bazaar transfer starts from private island checks where implemented.
 - Bazaar transfer target safety is controlled by the target value the operator enters. Example: if sender has 200m and should keep about 10m, run the transfer target as about 190m.
+
+## Remote Control Protocol To Implement In AutoAuction
+
+The API side is ready. AutoAuction now needs to send the runtime data.
+
+API to mod websocket:
+
+- `request_screenshot`
+
+Expected mod response:
+
+```json
+{
+  "type": "client_screenshot",
+  "imageMime": "image/jpeg",
+  "imageBase64": "<base64 image>",
+  "capturedAt": "2026-06-23T00:00:00.000Z"
+}
+```
+
+Mod event/log message:
+
+```json
+{
+  "type": "client_log",
+  "level": "info",
+  "message": "Handoff complete, new account is Username"
+}
+```
+
+Valid log levels are `debug`, `info`, `warn`, and `error`. Do not include API keys, Discord webhooks, proxy credentials, launcher tokens, or other secrets in `client_log`.
+
+Important AutoAuction events that should emit `client_log`:
+
+- mod websocket authenticated
+- account handoff started
+- handoff complete and active username
+- transfer invite accepted
+- transfer started
+- transfer stopped/cancelled
+- buy order created
+- instant sell completed
+- sell order created
+- sender instant-buy completed
+- transfer cycle complete
+- receiver purse before/after/delta
+- Bazaar/menu stuck state
+- transfer error and recovery cleanup result
 
 ## Verification
 
@@ -101,8 +157,31 @@ Copy-Item "build\libs\autoauction-1.0.0.jar" "C:\Users\SoulP\AppData\Roaming\Pri
 
 ## Next Work
 
-1. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
-2. Add partial-stack inventory splitting if exact quantities smaller than a full-stack multiple are needed.
-3. Continue testing Bazaar product ID resolution with more item families.
-4. Add dashboard visibility for reconnects and live transfer session state.
-5. Commit any future runtime-flow changes immediately after verification.
+Immediate next slice:
+
+1. In `ModSocketClient`, handle incoming `request_screenshot`.
+2. Capture the Minecraft framebuffer on the render/client thread.
+3. Encode the screenshot as JPEG or PNG base64.
+4. Send `client_screenshot` on the existing authenticated websocket.
+5. Add a small `sendClientLog(level, message)` helper that strips/avoids secrets.
+6. Add focused tests for:
+   - `request_screenshot` dispatch
+   - `client_screenshot` payload formatting
+   - `client_log` helper not logging API keys
+7. Build and copy the jar to all three active Prism mod folders.
+8. Test from dashboard:
+   - open an account card with `Connect`
+   - verify URL is `/remote/<minecraft_uuid>`
+   - click `Refresh`
+   - verify screenshot appears
+   - trigger one transfer/handoff event and verify it appears in In-game Logs
+
+After screenshot/logs work:
+
+1. Add dashboard Send Action protocol support in the API.
+2. Add AutoAuction handling for remote server command, normal chat message, and client-side mod action.
+3. Add better transfer recovery if a Bazaar menu changes or a cycle stalls.
+4. Add partial-stack inventory splitting if exact quantities smaller than a full-stack multiple are needed.
+5. Continue testing Bazaar product ID resolution with more item families.
+6. Add dashboard visibility for reconnects and live transfer session state.
+7. Commit any future runtime-flow changes immediately after verification.
