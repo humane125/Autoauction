@@ -100,6 +100,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
 	private static final int PLAYER_INVENTORY_LAST_SLOT = 89;
+	private static final int REMOTE_SCREENSHOT_MAX_WIDTH = 1280;
+	private static final int REMOTE_SCREENSHOT_MAX_HEIGHT = 720;
 
 	private AutoAuctionConfig config;
 	private AuctionAutomationController controller;
@@ -302,11 +304,25 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void sendRemoteScreenshot(NativeImage image, ModSocketClient.ScreenshotRequest request) {
 		Path tempFile = null;
 		try (image) {
+			NativeImage outputImage = resizeRemoteScreenshot(image);
 			tempFile = Files.createTempFile("autoauction-remote-", ".png");
-			image.writeToFile(tempFile);
-			String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(tempFile));
-			if (modSocketClient != null && modSocketClient.sendClientScreenshot("image/png", imageBase64, Instant.now().toString())) {
-				modSocketClient.sendClientLog("debug", "Remote screenshot captured for request " + request.requestId());
+			try {
+				outputImage.writeToFile(tempFile);
+				byte[] imageBytes = Files.readAllBytes(tempFile);
+				String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
+				if (modSocketClient != null && modSocketClient.sendClientScreenshot("image/png", imageBase64, Instant.now().toString())) {
+					modSocketClient.sendClientLog("debug", String.format(
+						"Remote screenshot captured for request %s (%dx%d, %d KB)",
+						request.requestId(),
+						outputImage.getWidth(),
+						outputImage.getHeight(),
+						Math.max(1, imageBytes.length / 1024)
+					));
+				}
+			} finally {
+				if (outputImage != image) {
+					outputImage.close();
+				}
 			}
 		} catch (Exception error) {
 			Autoauction.LOGGER.warn("AutoAuction remote screenshot encode failed", error);
@@ -321,6 +337,26 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 			}
 		}
+	}
+
+	private NativeImage resizeRemoteScreenshot(NativeImage image) {
+		int width = image.getWidth();
+		int height = image.getHeight();
+		double scale = Math.min(
+			1.0D,
+			Math.min(
+				(double) REMOTE_SCREENSHOT_MAX_WIDTH / Math.max(1, width),
+				(double) REMOTE_SCREENSHOT_MAX_HEIGHT / Math.max(1, height)
+			)
+		);
+		if (scale >= 1.0D) {
+			return image;
+		}
+		int resizedWidth = Math.max(1, (int) Math.round(width * scale));
+		int resizedHeight = Math.max(1, (int) Math.round(height * scale));
+		NativeImage resized = new NativeImage(resizedWidth, resizedHeight, false);
+		image.resizeSubRectTo(0, 0, width, height, resized);
+		return resized;
 	}
 
 	private void handlePendingHandoff(Minecraft client) {
