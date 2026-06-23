@@ -502,6 +502,10 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean sendClientLog(String level, String messageText) {
+		return sendClientLog(level, "system", messageText);
+	}
+
+	public synchronized boolean sendClientLog(String level, String source, String messageText) {
 		if (!authenticated || connection == null) {
 			return false;
 		}
@@ -512,6 +516,7 @@ public final class ModSocketClient implements AutoCloseable {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "client_log");
 		message.addProperty("level", cleanLogLevel(level));
+		message.addProperty("source", cleanLogSource(source));
 		message.addProperty("message", cleanMessage);
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent client_log");
@@ -685,6 +690,14 @@ public final class ModSocketClient implements AutoCloseable {
 		return switch (clean) {
 			case "debug", "info", "warn", "error" -> clean;
 			default -> "info";
+		};
+	}
+
+	private String cleanLogSource(String source) {
+		String clean = String.valueOf(source == null ? "" : source).trim().toLowerCase();
+		return switch (clean) {
+			case "chat", "system", "debug", "status" -> clean;
+			default -> "system";
 		};
 	}
 

@@ -363,7 +363,7 @@ class ModSocketClientTest {
 		transport.message("{\"type\":\"auth_ok\"}");
 
 		assertTrue(client.sendClientScreenshot("image/png", "abc123", "2026-06-23T12:00:00Z"));
-		assertTrue(client.sendClientLog("warn", "Transfer ready hpx_secret_remote_key \u00a7aGREEN"));
+		assertTrue(client.sendClientLog("warn", "chat", "Transfer ready hpx_secret_remote_key \u00a7aGREEN"));
 
 		String screenshotPayload = transport.connection.sentMessages.stream()
 			.filter(message -> message.contains("\"type\":\"client_screenshot\""))
@@ -378,6 +378,7 @@ class ModSocketClientTest {
 			.findFirst()
 			.orElseThrow();
 		assertTrue(logPayload.contains("\"level\":\"warn\""));
+		assertTrue(logPayload.contains("\"source\":\"chat\""));
 		assertTrue(logPayload.contains("\"message\":\"Transfer ready [redacted] GREEN\""));
 		assertFalse(logPayload.contains("hpx_secret_remote_key"));
 		client.close();

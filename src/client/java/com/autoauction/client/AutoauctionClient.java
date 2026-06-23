@@ -477,8 +477,14 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void registerMessageHandlers() {
+		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
+			sendRemoteChatLog(message.getString())
+		);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			String text = message.getString();
+			if (!overlay) {
+				sendRemoteChatLog(text);
+			}
 			if (AuctionBlockedMessageDetector.isCookieBuffRequired(text)) {
 				handleCookieBuffRequired();
 			}
@@ -751,8 +757,14 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void sendRemoteClientLog(String level, String message) {
-		if (modSocketClient != null && !modSocketClient.sendClientLog(level, message)) {
+		if (modSocketClient != null && !modSocketClient.sendClientLog(level, "system", message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
+		}
+	}
+
+	private void sendRemoteChatLog(String message) {
+		if (modSocketClient != null && !modSocketClient.sendClientLog("info", "chat", message)) {
+			Autoauction.LOGGER.debug("AutoAuction remote chat log skipped: {}", message);
 		}
 	}
 
