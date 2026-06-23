@@ -18,12 +18,13 @@ class TransferChatComponentsTest {
 	void addsPairSuggestionButtonToConnectedAccounts() {
 		Component message = TransferChatComponents.forMessage("- ReceiverOne (hypixel)");
 
-		assertEquals("- ReceiverOne (hypixel)\n    [ Pair ]", message.getString());
+		assertEquals("- ReceiverOne (hypixel) [Pair]", message.getString());
 		assertEquals("/mf pair ReceiverOne ", clickCommand(message, "Pair"));
 		assertInstanceOf(ClickEvent.SuggestCommand.class, clickEvent(message, "Pair"));
 		assertEquals(TextColor.fromLegacyFormat(ChatFormatting.GOLD),
 			clickableSibling(message, "Pair").getStyle().getColor());
 		assertTrue(clickableSibling(message, "Pair").getStyle().isBold());
+		assertEquals(false, clickableSibling(message, "Pair").getStyle().isUnderlined());
 		assertHoverText(message, "Pair", "Click to fill /mf pair ReceiverOne <item>", ChatFormatting.AQUA);
 	}
 
@@ -33,8 +34,8 @@ class TransferChatComponentsTest {
 			"AutoAuction transfer invite from SenderPlayer for ENCHANTED DIAMOND. Run /mf accept SenderPlayer or /mf decline SenderPlayer."
 		);
 
-		assertTrue(message.getString().contains("\n    [ Accept ]"));
-		assertTrue(message.getString().contains("\n    [ Decline ]"));
+		assertTrue(message.getString().contains(" [Accept]"));
+		assertTrue(message.getString().contains(" [Decline]"));
 		assertEquals("/mf accept SenderPlayer", clickCommand(message, "Accept"));
 		assertEquals("/mf decline SenderPlayer", clickCommand(message, "Decline"));
 		assertInstanceOf(ClickEvent.RunCommand.class, clickEvent(message, "Accept"));
@@ -43,6 +44,8 @@ class TransferChatComponentsTest {
 			clickableSibling(message, "Accept").getStyle().getColor());
 		assertEquals(TextColor.fromLegacyFormat(ChatFormatting.RED),
 			clickableSibling(message, "Decline").getStyle().getColor());
+		assertEquals(false, clickableSibling(message, "Accept").getStyle().isUnderlined());
+		assertEquals(false, clickableSibling(message, "Decline").getStyle().isUnderlined());
 		assertHoverText(message, "Accept", "Accept SenderPlayer's transfer invite", ChatFormatting.GREEN);
 		assertHoverText(message, "Decline", "Decline SenderPlayer's transfer invite", ChatFormatting.RED);
 	}
@@ -53,8 +56,8 @@ class TransferChatComponentsTest {
 			"AutoAuction transfer paired as sender with ReceiverPlayer for ENCHANTED DIAMOND. Bazaar automation is waiting for menu dumps."
 		);
 
-		assertTrue(message.getString().contains("\n    [ Run ]"));
-		assertTrue(message.getString().contains("\n    [ Cancel ]"));
+		assertTrue(message.getString().contains(" [Run]"));
+		assertTrue(message.getString().contains(" [Cancel]"));
 		assertEquals("/mf run ", clickCommand(message, "Run"));
 		assertEquals("/mf cancel", clickCommand(message, "Cancel"));
 		assertInstanceOf(ClickEvent.SuggestCommand.class, clickEvent(message, "Run"));

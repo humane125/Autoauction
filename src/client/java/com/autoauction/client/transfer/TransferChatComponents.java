@@ -24,7 +24,7 @@ public final class TransferChatComponents {
 
 		Matcher account = ACCOUNT_LINE.matcher(text);
 		if (account.matches()) {
-			return component.append(buttonLine("Pair", ChatFormatting.GOLD,
+			return component.append(buttonInline("Pair", ChatFormatting.GOLD,
 				new ClickEvent.SuggestCommand("/mf pair " + account.group(1) + " "),
 				"Click to fill /mf pair " + account.group(1) + " <item>", ChatFormatting.AQUA));
 		}
@@ -33,42 +33,42 @@ public final class TransferChatComponents {
 		if (incoming.matches()) {
 			String sender = incoming.group(1);
 			return component
-				.append(buttonLine("Accept", ChatFormatting.GREEN, new ClickEvent.RunCommand("/mf accept " + sender),
+				.append(buttonInline("Accept", ChatFormatting.GREEN, new ClickEvent.RunCommand("/mf accept " + sender),
 					"Accept " + sender + "'s transfer invite", ChatFormatting.GREEN))
-				.append(buttonLine("Decline", ChatFormatting.RED, new ClickEvent.RunCommand("/mf decline " + sender),
+				.append(buttonInline("Decline", ChatFormatting.RED, new ClickEvent.RunCommand("/mf decline " + sender),
 					"Decline " + sender + "'s transfer invite", ChatFormatting.RED));
 		}
 
 		Matcher pending = PENDING_INVITE.matcher(text);
 		if (pending.matches()) {
-			return component.append(buttonLine("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
+			return component.append(buttonInline("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
 				"Cancel pending transfer", ChatFormatting.RED));
 		}
 
 		Matcher paired = PAIRED.matcher(text);
 		if (paired.matches()) {
 			if ("sender".equalsIgnoreCase(paired.group(1))) {
-				component.append(buttonLine("Run", ChatFormatting.GOLD, new ClickEvent.SuggestCommand("/mf run "),
+				component.append(buttonInline("Run", ChatFormatting.GOLD, new ClickEvent.SuggestCommand("/mf run "),
 					"Click to fill /mf run <target>", ChatFormatting.AQUA));
 			}
-			return component.append(buttonLine("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
+			return component.append(buttonInline("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
 				"Cancel transfer session", ChatFormatting.RED));
 		}
 
 		return component;
 	}
 
-	private static MutableComponent buttonLine(String label, ChatFormatting color, ClickEvent clickEvent, String hoverText,
-											 ChatFormatting hoverColor) {
-		return Component.literal("\n    ").append(button(label, color, clickEvent, hoverText, hoverColor));
+	private static MutableComponent buttonInline(String label, ChatFormatting color, ClickEvent clickEvent, String hoverText,
+												ChatFormatting hoverColor) {
+		return Component.literal(" ").append(button(label, color, clickEvent, hoverText, hoverColor));
 	}
 
 	private static MutableComponent button(String label, ChatFormatting color, ClickEvent clickEvent, String hoverText,
 										  ChatFormatting hoverColor) {
-		return Component.literal("[ " + label + " ]").withStyle(style -> style
+		return Component.literal("[" + label + "]").withStyle(style -> style
 			.withColor(color)
 			.withBold(true)
-			.withUnderlined(true)
+			.withUnderlined(false)
 			.withClickEvent(clickEvent)
 			.withHoverEvent(new HoverEvent.ShowText(Component.literal(hoverText).withStyle(hoverColor))));
 	}
