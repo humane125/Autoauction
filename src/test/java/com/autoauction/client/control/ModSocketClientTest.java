@@ -363,7 +363,15 @@ class ModSocketClientTest {
 		transport.message("{\"type\":\"auth_ok\"}");
 
 		assertTrue(client.sendClientScreenshot("image/png", "abc123", "2026-06-23T12:00:00Z"));
-		assertTrue(client.sendClientLog("warn", "chat", "Transfer ready hpx_secret_remote_key \u00a7aGREEN"));
+		assertTrue(client.sendClientLog(
+			"warn",
+			"chat",
+			"Transfer ready hpx_secret_remote_key \u00a7aGREEN",
+			List.of(
+				new ModSocketClient.RemoteLogSegment("Transfer  ", "#55FF55", true, false, false, false),
+				new ModSocketClient.RemoteLogSegment("ready", "#FFFFFF", false, false, false, false)
+			)
+		));
 
 		String screenshotPayload = transport.connection.sentMessages.stream()
 			.filter(message -> message.contains("\"type\":\"client_screenshot\""))
@@ -380,6 +388,10 @@ class ModSocketClientTest {
 		assertTrue(logPayload.contains("\"level\":\"warn\""));
 		assertTrue(logPayload.contains("\"source\":\"chat\""));
 		assertTrue(logPayload.contains("\"message\":\"Transfer ready [redacted] GREEN\""));
+		assertTrue(logPayload.contains("\"segments\""));
+		assertTrue(logPayload.contains("\"text\":\"Transfer  \""));
+		assertTrue(logPayload.contains("\"color\":\"#55FF55\""));
+		assertTrue(logPayload.contains("\"bold\":true"));
 		assertFalse(logPayload.contains("hpx_secret_remote_key"));
 		client.close();
 	}

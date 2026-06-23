@@ -57,6 +57,8 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.Connection;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
@@ -478,12 +480,12 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void registerMessageHandlers() {
 		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-			sendRemoteChatLog(message.getString())
+			sendRemoteChatLog(message)
 		);
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			String text = message.getString();
 			if (!overlay) {
-				sendRemoteChatLog(text);
+				sendRemoteChatLog(message);
 			}
 			if (AuctionBlockedMessageDetector.isCookieBuffRequired(text)) {
 				handleCookieBuffRequired();
@@ -766,6 +768,40 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (modSocketClient != null && !modSocketClient.sendClientLog("info", "chat", message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote chat log skipped: {}", message);
 		}
+	}
+
+	private void sendRemoteChatLog(Component message) {
+		List<ModSocketClient.RemoteLogSegment> segments = remoteLogSegments(message);
+		String plainMessage = message.getString();
+		if (modSocketClient != null && !modSocketClient.sendClientLog("info", "chat", plainMessage, segments)) {
+			Autoauction.LOGGER.debug("AutoAuction remote chat log skipped: {}", plainMessage);
+		}
+	}
+
+	private List<ModSocketClient.RemoteLogSegment> remoteLogSegments(Component message) {
+		List<ModSocketClient.RemoteLogSegment> segments = new ArrayList<>();
+		message.visit((style, text) -> {
+			if (!text.isBlank()) {
+				segments.add(new ModSocketClient.RemoteLogSegment(
+					text,
+					remoteLogColor(style),
+					style.isBold(),
+					style.isItalic(),
+					style.isUnderlined(),
+					style.isStrikethrough()
+				));
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		return segments;
+	}
+
+	private String remoteLogColor(Style style) {
+		TextColor color = style.getColor();
+		if (color == null) {
+			return null;
+		}
+		return String.format("#%06X", color.getValue() & 0xFFFFFF);
 	}
 
 	private void handleDumpSlotsHotkey(Minecraft client) {

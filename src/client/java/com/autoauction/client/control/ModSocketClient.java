@@ -506,6 +506,10 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean sendClientLog(String level, String source, String messageText) {
+		return sendClientLog(level, source, messageText, List.of());
+	}
+
+	public synchronized boolean sendClientLog(String level, String source, String messageText, List<RemoteLogSegment> segments) {
 		if (!authenticated || connection == null) {
 			return false;
 		}
@@ -518,6 +522,10 @@ public final class ModSocketClient implements AutoCloseable {
 		message.addProperty("level", cleanLogLevel(level));
 		message.addProperty("source", cleanLogSource(source));
 		message.addProperty("message", cleanMessage);
+		JsonArray cleanSegments = cleanLogSegments(segments);
+		if (!cleanSegments.isEmpty()) {
+			message.add("segments", cleanSegments);
+		}
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent client_log");
 		return true;
@@ -712,6 +720,64 @@ public final class ModSocketClient implements AutoCloseable {
 		return clean;
 	}
 
+	private JsonArray cleanLogSegments(List<RemoteLogSegment> segments) {
+		JsonArray array = new JsonArray();
+		if (segments == null) {
+			return array;
+		}
+		int totalCharacters = 0;
+		for (RemoteLogSegment segment : segments) {
+			if (segment == null) {
+				continue;
+			}
+			String text = sanitizeRemoteLogSegmentText(segment.text());
+			if (text.isEmpty()) {
+				continue;
+			}
+			int remainingCharacters = 1_200 - totalCharacters;
+			if (remainingCharacters <= 0) {
+				break;
+			}
+			if (text.length() > remainingCharacters) {
+				text = text.substring(0, remainingCharacters);
+			}
+			totalCharacters += text.length();
+
+			JsonObject object = new JsonObject();
+			object.addProperty("text", text);
+			if (segment.color() != null && segment.color().matches("^#[0-9A-Fa-f]{6}$")) {
+				object.addProperty("color", segment.color().toUpperCase());
+			}
+			if (segment.bold()) {
+				object.addProperty("bold", true);
+			}
+			if (segment.italic()) {
+				object.addProperty("italic", true);
+			}
+			if (segment.underline()) {
+				object.addProperty("underline", true);
+			}
+			if (segment.strikethrough()) {
+				object.addProperty("strikethrough", true);
+			}
+			array.add(object);
+			if (array.size() >= 80) {
+				break;
+			}
+		}
+		return array;
+	}
+
+	private String sanitizeRemoteLogSegmentText(String messageText) {
+		String clean = String.valueOf(messageText == null ? "" : messageText)
+			.replaceAll("(?i)(?:\\u00a7|&)[0-9a-fk-or]", "");
+		String apiToken = String.valueOf(config.apiToken() == null ? "" : config.apiToken()).trim();
+		if (!apiToken.isBlank()) {
+			clean = clean.replace(apiToken, "[redacted]");
+		}
+		return clean;
+	}
+
 	static URI socketUri(String apiBaseUrl) {
 		String cleanBase = String.valueOf(apiBaseUrl == null ? "" : apiBaseUrl).replaceAll("/+$", "");
 		if (cleanBase.startsWith("https://")) {
@@ -807,6 +873,16 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public record ScreenshotRequest(int accountId, String requestId) {
+	}
+
+	public record RemoteLogSegment(
+		String text,
+		String color,
+		boolean bold,
+		boolean italic,
+		boolean underline,
+		boolean strikethrough
+	) {
 	}
 
 	private record AuthMessage(String type, String apiKey, String username, String clientVersion) {
