@@ -37,6 +37,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private final Consumer<String> logSink;
 	private final Consumer<String> disconnectHandler;
 	private final TransferHandler transferHandler;
+	private final ScreenshotHandler screenshotHandler;
 
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
@@ -65,6 +66,10 @@ public final class ModSocketClient implements AutoCloseable {
 		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), disconnectHandler, transferHandler);
 	}
 
+	public ModSocketClient(AutoAuctionConfig config, Consumer<String> disconnectHandler, TransferHandler transferHandler, ScreenshotHandler screenshotHandler) {
+		this(config, new JavaWebSocketTransport(), DEFAULT_HEARTBEAT_INTERVAL_MS, message -> Autoauction.LOGGER.info(message), disconnectHandler, transferHandler, screenshotHandler);
+	}
+
 	ModSocketClient(AutoAuctionConfig config, Transport transport, long heartbeatIntervalMs) {
 		this(config, transport, heartbeatIntervalMs, message -> Autoauction.LOGGER.info(message), reason -> {});
 	}
@@ -85,6 +90,18 @@ public final class ModSocketClient implements AutoCloseable {
 		Consumer<String> disconnectHandler,
 		TransferHandler transferHandler
 	) {
+		this(config, transport, heartbeatIntervalMs, logSink, disconnectHandler, transferHandler, ScreenshotHandler.NOOP);
+	}
+
+	ModSocketClient(
+		AutoAuctionConfig config,
+		Transport transport,
+		long heartbeatIntervalMs,
+		Consumer<String> logSink,
+		Consumer<String> disconnectHandler,
+		TransferHandler transferHandler,
+		ScreenshotHandler screenshotHandler
+	) {
 		this(
 			config,
 			transport,
@@ -93,7 +110,8 @@ public final class ModSocketClient implements AutoCloseable {
 			DEFAULT_RECONNECT_MAX_DELAY_MS,
 			logSink,
 			disconnectHandler,
-			transferHandler
+			transferHandler,
+			screenshotHandler
 		);
 	}
 
@@ -105,7 +123,8 @@ public final class ModSocketClient implements AutoCloseable {
 		long reconnectMaxDelayMs,
 		Consumer<String> logSink,
 		Consumer<String> disconnectHandler,
-		TransferHandler transferHandler
+		TransferHandler transferHandler,
+		ScreenshotHandler screenshotHandler
 	) {
 		this.config = config;
 		this.transport = transport;
@@ -116,6 +135,7 @@ public final class ModSocketClient implements AutoCloseable {
 		this.logSink = logSink;
 		this.disconnectHandler = disconnectHandler;
 		this.transferHandler = transferHandler == null ? TransferHandler.NOOP : transferHandler;
+		this.screenshotHandler = screenshotHandler == null ? ScreenshotHandler.NOOP : screenshotHandler;
 		this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
 			Thread thread = new Thread(runnable, "autoauction-mod-socket");
 			thread.setDaemon(true);
@@ -232,6 +252,10 @@ public final class ModSocketClient implements AutoCloseable {
 			String reason = stringProperty(message, "reason", "AutoAuction remote disconnect requested.");
 			log("AutoAuction mod socket received disconnect_now: " + reason);
 			disconnectHandler.accept(reason);
+			return;
+		}
+		if (Objects.equals(type, "request_screenshot")) {
+			screenshotHandler.onRequest(new ScreenshotRequest(intProperty(message, "accountId", 0), stringProperty(message, "requestId", "")));
 			return;
 		}
 		if (Objects.equals(type, "transfer_accounts")) {
@@ -456,6 +480,44 @@ public final class ModSocketClient implements AutoCloseable {
 		return sendTransferMessage(message);
 	}
 
+	public synchronized boolean sendClientScreenshot(String imageMime, String imageBase64, String capturedAt) {
+		if (!authenticated || connection == null) {
+			return false;
+		}
+		String cleanImageBase64 = String.valueOf(imageBase64 == null ? "" : imageBase64).trim();
+		if (cleanImageBase64.isBlank()) {
+			return false;
+		}
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "client_screenshot");
+		message.addProperty("imageMime", cleanImageMime(imageMime));
+		message.addProperty("imageBase64", cleanImageBase64);
+		String cleanCapturedAt = String.valueOf(capturedAt == null ? "" : capturedAt).trim();
+		if (!cleanCapturedAt.isBlank()) {
+			message.addProperty("capturedAt", cleanCapturedAt);
+		}
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket sent client_screenshot");
+		return true;
+	}
+
+	public synchronized boolean sendClientLog(String level, String messageText) {
+		if (!authenticated || connection == null) {
+			return false;
+		}
+		String cleanMessage = sanitizeRemoteLogMessage(messageText);
+		if (cleanMessage.isBlank()) {
+			return false;
+		}
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "client_log");
+		message.addProperty("level", cleanLogLevel(level));
+		message.addProperty("message", cleanMessage);
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket sent client_log");
+		return true;
+	}
+
 	private synchronized boolean sendTransferMessage(JsonObject message) {
 		if (!authenticated || connection == null) {
 			return false;
@@ -610,6 +672,33 @@ public final class ModSocketClient implements AutoCloseable {
 		logSink.accept(message);
 	}
 
+	private String cleanImageMime(String imageMime) {
+		String clean = String.valueOf(imageMime == null ? "" : imageMime).trim().toLowerCase();
+		if (clean.equals("image/png") || clean.equals("image/jpeg")) {
+			return clean;
+		}
+		return "image/jpeg";
+	}
+
+	private String cleanLogLevel(String level) {
+		String clean = String.valueOf(level == null ? "" : level).trim().toLowerCase();
+		return switch (clean) {
+			case "debug", "info", "warn", "error" -> clean;
+			default -> "info";
+		};
+	}
+
+	private String sanitizeRemoteLogMessage(String messageText) {
+		String clean = String.valueOf(messageText == null ? "" : messageText)
+			.replaceAll("(?i)(?:\\u00a7|&)[0-9a-fk-or]", "")
+			.trim();
+		String apiToken = String.valueOf(config.apiToken() == null ? "" : config.apiToken()).trim();
+		if (!apiToken.isBlank()) {
+			clean = clean.replace(apiToken, "[redacted]");
+		}
+		return clean;
+	}
+
 	static URI socketUri(String apiBaseUrl) {
 		String cleanBase = String.valueOf(apiBaseUrl == null ? "" : apiBaseUrl).replaceAll("/+$", "");
 		if (cleanBase.startsWith("https://")) {
@@ -685,6 +774,13 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 	}
 
+	public interface ScreenshotHandler {
+		ScreenshotHandler NOOP = request -> {
+		};
+
+		void onRequest(ScreenshotRequest request);
+	}
+
 	public record TransferAccount(String minecraftUsername, String status) {
 	}
 
@@ -695,6 +791,9 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public record TransferCycle(TransferSession session, int quantity, long before, long after, long delta) {
+	}
+
+	public record ScreenshotRequest(int accountId, String requestId) {
 	}
 
 	private record AuthMessage(String type, String apiKey, String username, String clientVersion) {

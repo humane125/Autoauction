@@ -38,6 +38,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import com.mojang.blaze3d.platform.NativeImage;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -48,6 +49,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientLoginConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -63,8 +65,11 @@ import net.minecraft.world.scores.Scoreboard;
 import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -133,7 +138,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.actions = new MinecraftGameActions();
 			this.apiClient = new AuctionApiClient(config);
 			this.transferController = new TransferController();
-			this.modSocketClient = new ModSocketClient(config, this::disconnectFromRemoteCommand, transferSocketHandler());
+			this.modSocketClient = new ModSocketClient(config, this::disconnectFromRemoteCommand, transferSocketHandler(), this::handleRemoteScreenshotRequest);
 			this.notifier = new DiscordNotifier(config);
 			this.handoffClient = new AltManagerHandoffClient();
 			registerCommands();
@@ -277,6 +282,45 @@ public class AutoauctionClient implements ClientModInitializer {
 		});
 	}
 
+	private void handleRemoteScreenshotRequest(ModSocketClient.ScreenshotRequest request) {
+		Minecraft client = Minecraft.getInstance();
+		client.execute(() -> {
+			if (modSocketClient == null) {
+				return;
+			}
+			try {
+				Screenshot.takeScreenshot(client.getMainRenderTarget(), image -> sendRemoteScreenshot(image, request));
+			} catch (RuntimeException error) {
+				Autoauction.LOGGER.warn("AutoAuction remote screenshot failed", error);
+				modSocketClient.sendClientLog("error", "Remote screenshot failed: " + error.getMessage());
+			}
+		});
+	}
+
+	private void sendRemoteScreenshot(NativeImage image, ModSocketClient.ScreenshotRequest request) {
+		Path tempFile = null;
+		try (image) {
+			tempFile = Files.createTempFile("autoauction-remote-", ".png");
+			image.writeToFile(tempFile);
+			String imageBase64 = Base64.getEncoder().encodeToString(Files.readAllBytes(tempFile));
+			if (modSocketClient != null && modSocketClient.sendClientScreenshot("image/png", imageBase64, Instant.now().toString())) {
+				modSocketClient.sendClientLog("debug", "Remote screenshot captured for request " + request.requestId());
+			}
+		} catch (Exception error) {
+			Autoauction.LOGGER.warn("AutoAuction remote screenshot encode failed", error);
+			if (modSocketClient != null) {
+				modSocketClient.sendClientLog("error", "Remote screenshot encode failed: " + error.getMessage());
+			}
+		} finally {
+			if (tempFile != null) {
+				try {
+					Files.deleteIfExists(tempFile);
+				} catch (Exception ignored) {
+				}
+			}
+		}
+	}
+
 	private void handlePendingHandoff(Minecraft client) {
 		if (pendingHandoff == null || controller == null || actions == null) {
 			return;
@@ -350,6 +394,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		controller.start();
 		workflowStarted = false;
 		notifyInfoAsync("account handoff complete for " + currentUsername + ".");
+		sendRemoteClientLog("info", "Handoff complete, new account is " + currentUsername);
 		pendingHandoff = null;
 	}
 
@@ -514,27 +559,32 @@ public class AutoauctionClient implements ClientModInitializer {
 
 			@Override
 			public void onInvite(ModSocketClient.TransferSession session) {
+				sendRemoteClientLog("info", "Transfer invite received from " + session.senderUsername() + " for " + session.itemName());
 				sendTransferFeedback(transferController.incomingInvite(toTransferSession(session)));
 			}
 
 			@Override
 			public void onPending(ModSocketClient.TransferSession session) {
+				sendRemoteClientLog("info", "Transfer invite pending for " + session.receiverUsername() + " using " + session.itemName());
 				sendTransferFeedback(transferController.outgoingPending(toTransferSession(session)));
 			}
 
 			@Override
 			public void onAccepted(ModSocketClient.TransferSession session, String role) {
 				transferLoopGoal = null;
+				sendRemoteClientLog("info", "Transfer accepted as " + role + " for " + session.itemName());
 				sendTransferFeedback(transferController.accepted(toTransferSession(session), transferRole(role)));
 			}
 
 			@Override
 			public void onDeclined(ModSocketClient.TransferSession session, String reason) {
+				sendRemoteClientLog("warn", "Transfer declined: " + reason);
 				sendTransferFeedback(transferController.declined(reason));
 			}
 
 			@Override
 			public void onCancelled(String sessionId, String reason) {
+				sendRemoteClientLog("warn", "Transfer cancelled: " + reason);
 				sendTransferFeedback(transferController.cancelled(reason));
 				receiverBuyOrderWorkflow = null;
 				receiverSellOfferWorkflow = null;
@@ -553,6 +603,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			@Override
 			public void onRun(ModSocketClient.TransferRun run) {
 				TransferController.Session session = toTransferSession(run.session());
+				sendRemoteClientLog("info", "Transfer run started: receiver creating buy order for " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback(transferController.incomingRun(run.quantity()));
 				Minecraft.getInstance().execute(() -> {
 					startTransferPurseTracking("receiver", Minecraft.getInstance());
@@ -569,6 +620,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			@Override
 			public void onBuyOrderReady(ModSocketClient.TransferRun run) {
 				TransferController.Session session = toTransferSession(run.session());
+				sendRemoteClientLog("info", "Buy order ready: sender instant-selling " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback("AutoAuction transfer buy order ready: selling " + run.quantity() + "x " + session.itemName() + ".");
 				Minecraft.getInstance().execute(() -> {
 					senderInstantSellWorkflow = new SenderInstantSellWorkflow(session.itemName(), run.quantity());
@@ -579,6 +631,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			@Override
 			public void onSellOfferReady(ModSocketClient.TransferRun run) {
 				TransferController.Session session = toTransferSession(run.session());
+				sendRemoteClientLog("info", "Sell offer ready: sender instant-buying " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback("AutoAuction transfer sell offer ready: buying " + run.quantity() + "x " + session.itemName() + ".");
 				Minecraft.getInstance().execute(() -> {
 					senderInstantBuyWorkflow = new SenderInstantBuyWorkflow(session.itemName(), run.quantity());
@@ -589,6 +642,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			@Override
 			public void onSellOfferBought(ModSocketClient.TransferRun run) {
 				TransferController.Session session = toTransferSession(run.session());
+				sendRemoteClientLog("info", "Sell offer bought: receiver claiming coins for " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback("AutoAuction transfer sell offer bought: claiming coins for " + run.quantity() + "x " + session.itemName() + ".");
 				pendingTransferSellFill = null;
 				startReceiverClaimSellOfferWorkflow(session.itemName(), run.quantity());
@@ -601,6 +655,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 			@Override
 			public void onError(String code, String message) {
+				sendRemoteClientLog("error", "Transfer error " + code + ": " + message);
 				sendTransferFeedback(transferController.error(code, message));
 				receiverBuyOrderWorkflow = null;
 				receiverSellOfferWorkflow = null;
@@ -630,6 +685,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void handleTransferCycleComplete(ModSocketClient.TransferCycle cycle) {
 		TransferLoopGoal goal = transferLoopGoal;
 		String itemName = cycle.session().itemName();
+		sendRemoteClientLog("info", "Transfer cycle complete for " + cycle.quantity() + "x " + itemName
+			+ ": before=" + cycle.before() + " after=" + cycle.after() + " delta=" + cycle.delta());
 		sendTransferFeedback("AutoAuction transfer cycle complete for " + cycle.quantity() + "x " + itemName
 			+ ": receiver delta=" + formatSignedCoins(cycle.delta()) + ".");
 		if (goal == null) {
@@ -691,6 +748,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				client.player.sendSystemMessage(TransferChatComponents.forMessage(message));
 			}
 		});
+	}
+
+	private void sendRemoteClientLog(String level, String message) {
+		if (modSocketClient != null && !modSocketClient.sendClientLog(level, message)) {
+			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
+		}
 	}
 
 	private void handleDumpSlotsHotkey(Minecraft client) {

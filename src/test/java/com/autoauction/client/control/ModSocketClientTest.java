@@ -327,6 +327,78 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void invokesScreenshotHandlerForIncomingRequest() {
+		FakeTransport transport = new FakeTransport();
+		List<ModSocketClient.ScreenshotRequest> requests = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(
+			config,
+			transport,
+			30_000,
+			message -> {},
+			reason -> {},
+			ModSocketClient.TransferHandler.NOOP,
+			requests::add
+		);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		transport.message("{\"type\":\"request_screenshot\",\"accountId\":12,\"requestId\":\"req-123\"}");
+
+		assertEquals(1, requests.size());
+		assertEquals(12, requests.getFirst().accountId());
+		assertEquals("req-123", requests.getFirst().requestId());
+		client.close();
+	}
+
+	@Test
+	void sendsScreenshotAndClientLogPayloadsAfterAuthOkWithoutLeakingSecrets() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_secret_remote_key");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+
+		assertTrue(client.sendClientScreenshot("image/png", "abc123", "2026-06-23T12:00:00Z"));
+		assertTrue(client.sendClientLog("warn", "Transfer ready hpx_secret_remote_key \u00a7aGREEN"));
+
+		String screenshotPayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"client_screenshot\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(screenshotPayload.contains("\"imageMime\":\"image/png\""));
+		assertTrue(screenshotPayload.contains("\"imageBase64\":\"abc123\""));
+		assertTrue(screenshotPayload.contains("\"capturedAt\":\"2026-06-23T12:00:00Z\""));
+
+		String logPayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"client_log\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(logPayload.contains("\"level\":\"warn\""));
+		assertTrue(logPayload.contains("\"message\":\"Transfer ready [redacted] GREEN\""));
+		assertFalse(logPayload.contains("hpx_secret_remote_key"));
+		client.close();
+	}
+
+	@Test
+	void ignoresRemoteControlPayloadsBeforeAuthOk() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+
+		assertFalse(client.sendClientScreenshot("image/png", "abc123", "2026-06-23T12:00:00Z"));
+		assertFalse(client.sendClientLog("info", "hello"));
+		assertEquals(1, transport.connection.sentMessages.size());
+		client.close();
+	}
+
+	@Test
 	void ignoresTransferCommandPayloadsBeforeAuthOk() {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
