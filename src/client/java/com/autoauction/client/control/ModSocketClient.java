@@ -27,12 +27,14 @@ public final class ModSocketClient implements AutoCloseable {
 	private static final long DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 	private static final long DEFAULT_RECONNECT_INITIAL_DELAY_MS = 100;
 	private static final long DEFAULT_RECONNECT_MAX_DELAY_MS = 30_000;
+	private static final long DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS = 15_000;
 
 	private final AutoAuctionConfig config;
 	private final Transport transport;
 	private final long heartbeatIntervalMs;
 	private final long reconnectInitialDelayMs;
 	private final long reconnectMaxDelayMs;
+	private final long connectAttemptTimeoutMs;
 	private final ScheduledExecutorService heartbeatExecutor;
 	private final Consumer<String> logSink;
 	private final Consumer<String> disconnectHandler;
@@ -43,6 +45,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
 	private ScheduledFuture<?> reconnectTask;
+	private ScheduledFuture<?> connectTimeoutTask;
 	private boolean authenticated;
 	private String lastReportedStatus;
 	private String connectedUsername;
@@ -141,6 +144,7 @@ public final class ModSocketClient implements AutoCloseable {
 			heartbeatIntervalMs,
 			DEFAULT_RECONNECT_INITIAL_DELAY_MS,
 			DEFAULT_RECONNECT_MAX_DELAY_MS,
+			DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS,
 			logSink,
 			disconnectHandler,
 			transferHandler,
@@ -155,6 +159,31 @@ public final class ModSocketClient implements AutoCloseable {
 		long heartbeatIntervalMs,
 		long reconnectInitialDelayMs,
 		long reconnectMaxDelayMs,
+		long connectAttemptTimeoutMs,
+		Consumer<String> logSink
+	) {
+		this(
+			config,
+			transport,
+			heartbeatIntervalMs,
+			reconnectInitialDelayMs,
+			reconnectMaxDelayMs,
+			connectAttemptTimeoutMs,
+			logSink,
+			reason -> {},
+			TransferHandler.NOOP,
+			ScreenshotHandler.NOOP,
+			RemoteActionHandler.NOOP
+		);
+	}
+
+	ModSocketClient(
+		AutoAuctionConfig config,
+		Transport transport,
+		long heartbeatIntervalMs,
+		long reconnectInitialDelayMs,
+		long reconnectMaxDelayMs,
+		long connectAttemptTimeoutMs,
 		Consumer<String> logSink,
 		Consumer<String> disconnectHandler,
 		TransferHandler transferHandler,
@@ -166,6 +195,7 @@ public final class ModSocketClient implements AutoCloseable {
 		this.heartbeatIntervalMs = heartbeatIntervalMs;
 		this.reconnectInitialDelayMs = Math.max(1, reconnectInitialDelayMs);
 		this.reconnectMaxDelayMs = Math.max(this.reconnectInitialDelayMs, reconnectMaxDelayMs);
+		this.connectAttemptTimeoutMs = Math.max(1, connectAttemptTimeoutMs);
 		this.reconnectDelayMs = this.reconnectInitialDelayMs;
 		this.logSink = logSink;
 		this.disconnectHandler = disconnectHandler;
@@ -204,6 +234,7 @@ public final class ModSocketClient implements AutoCloseable {
 		log("AutoAuction mod socket connecting to " + uri);
 		long generation = ++connectionGeneration;
 		connectingUsername = username;
+		scheduleConnectTimeout(generation);
 		CompletableFuture<Connection> connectionFuture = transport.connect(uri, new Listener() {
 			@Override
 			public void onOpen(Connection openedConnection) {
@@ -216,6 +247,7 @@ public final class ModSocketClient implements AutoCloseable {
 					connectedUsername = username;
 					connectingUsername = null;
 					reconnectDelayMs = reconnectInitialDelayMs;
+					cancelConnectTimeout();
 					cancelReconnect();
 				}
 				openedConnection.send(GSON.toJson(new AuthMessage(config.apiToken(), username, clientVersion)));
@@ -666,11 +698,36 @@ public final class ModSocketClient implements AutoCloseable {
 		if (generation != connectionGeneration) {
 			return;
 		}
+		cancelConnectTimeout();
 		connection = null;
 		authenticated = false;
 		connectedUsername = null;
 		connectingUsername = null;
 		scheduleReconnect();
+	}
+
+	private synchronized void scheduleConnectTimeout(long generation) {
+		cancelConnectTimeout();
+		connectTimeoutTask = heartbeatExecutor.schedule(() -> {
+			synchronized (ModSocketClient.this) {
+				if (closed || generation != connectionGeneration || connection != null || connectingUsername == null) {
+					return;
+				}
+				log("AutoAuction mod socket connect timed out after " + connectAttemptTimeoutMs + "ms");
+				connectionGeneration++;
+				authenticated = false;
+				connectedUsername = null;
+				connectingUsername = null;
+				scheduleReconnect();
+			}
+		}, connectAttemptTimeoutMs, TimeUnit.MILLISECONDS);
+	}
+
+	private synchronized void cancelConnectTimeout() {
+		if (connectTimeoutTask != null) {
+			connectTimeoutTask.cancel(false);
+			connectTimeoutTask = null;
+		}
 	}
 
 	private synchronized void scheduleReconnect() {
@@ -709,6 +766,7 @@ public final class ModSocketClient implements AutoCloseable {
 	public synchronized void close() {
 		closed = true;
 		cancelReconnect();
+		cancelConnectTimeout();
 		closeCurrentConnection();
 		heartbeatExecutor.shutdownNow();
 	}
@@ -716,6 +774,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private synchronized void closeCurrentConnection() {
 		connectionGeneration++;
 		cancelReconnect();
+		cancelConnectTimeout();
 		stopHeartbeat();
 		if (connection != null) {
 			if (authenticated) {
@@ -989,6 +1048,10 @@ public final class ModSocketClient implements AutoCloseable {
 				public void onError(WebSocket webSocket, Throwable error) {
 					connectionFuture.completeExceptionally(error);
 					listener.onError(error);
+				}
+			}).whenComplete((webSocket, error) -> {
+				if (error != null) {
+					connectionFuture.completeExceptionally(error);
 				}
 			});
 			return connectionFuture;

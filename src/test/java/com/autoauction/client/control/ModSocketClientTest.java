@@ -254,6 +254,20 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void retriesWhenConnectAttemptNeverCompletes() throws Exception {
+		HangingTransport transport = new HangingTransport();
+		List<String> logs = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000, 5, 5, 20, logs::add);
+
+		client.start("SocketPlayer", "26.1.1");
+
+		assertTrue(transport.awaitConnectCalls(2));
+		assertTrue(logs.stream().anyMatch(log -> log.contains("connect timed out")));
+		client.close();
+	}
+
+	@Test
 	void tickEnsureDoesNotBypassScheduledReconnectBackoff() throws Exception {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
@@ -611,6 +625,30 @@ class ModSocketClientTest {
 
 		void closeConnection(int index) {
 			listeners.get(index).onClose();
+		}
+
+		synchronized boolean awaitConnectCalls(int expected) throws InterruptedException {
+			long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+			while (System.nanoTime() < deadline) {
+				if (connectCalls >= expected) {
+					return true;
+				}
+				TimeUnit.MILLISECONDS.timedWait(this, 10);
+			}
+			return connectCalls >= expected;
+		}
+	}
+
+	private static final class HangingTransport implements ModSocketClient.Transport {
+		private int connectCalls;
+
+		@Override
+		public CompletableFuture<ModSocketClient.Connection> connect(URI uri, ModSocketClient.Listener listener) {
+			synchronized (this) {
+				connectCalls++;
+				notifyAll();
+			}
+			return new CompletableFuture<>();
 		}
 
 		synchronized boolean awaitConnectCalls(int expected) throws InterruptedException {
