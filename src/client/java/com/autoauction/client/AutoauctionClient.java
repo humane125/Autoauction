@@ -1074,6 +1074,14 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					return runTransferCommand(context.getSource(), targetCoins);
 				})))
+			.then(literal("switch").executes(context -> {
+				if (!modSocketClient.switchTransfer()) {
+					sendFeedback(context.getSource(), "AutoAuction transfer switch failed: mod socket is not connected yet.");
+					return 0;
+				}
+				sendFeedback(context.getSource(), "AutoAuction transfer switch requested.");
+				return 1;
+			}))
 			.then(literal("cancel").executes(context -> {
 				if (!modSocketClient.cancelTransfer()) {
 					sendFeedback(context.getSource(), "AutoAuction transfer cancel failed: mod socket is not connected yet.");

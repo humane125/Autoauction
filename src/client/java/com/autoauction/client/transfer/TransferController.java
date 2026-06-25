@@ -44,9 +44,12 @@ public final class TransferController {
 		this.session = nextSession;
 		this.role = nextRole;
 		this.state = State.PAIRED;
-		String partner = nextRole == Role.SENDER ? nextSession.receiverUsername() : nextSession.senderUsername();
-		return "AutoAuction transfer paired as " + nextRole.name().toLowerCase(Locale.ROOT) + " with " + partner
-			+ " for " + nextSession.itemName() + ". Bazaar automation is waiting for menu dumps.";
+		return "AutoAuction transfer paired. You are " + nextRole.name().toLowerCase(Locale.ROOT)
+			+ ". Sender: " + nextSession.senderUsername()
+			+ ". Receiver: " + nextSession.receiverUsername()
+			+ ". Item: " + nextSession.itemName()
+			+ ". Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins."
+			+ " Sender runs /mf run <target> when both accounts are ready.";
 	}
 
 	public String declined(String reason) {

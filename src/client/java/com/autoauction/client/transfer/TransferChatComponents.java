@@ -13,7 +13,7 @@ public final class TransferChatComponents {
 	private static final Pattern ACCOUNT_LINE = Pattern.compile("^-\\s+([^\\s]+)\\s+\\(([^)]*)\\)$");
 	private static final Pattern INCOMING_INVITE = Pattern.compile("^AutoAuction transfer invite from ([^\\s]+) for .+");
 	private static final Pattern PENDING_INVITE = Pattern.compile("^AutoAuction transfer invite sent to ([^\\s]+) for .+");
-	private static final Pattern PAIRED = Pattern.compile("^AutoAuction transfer paired as (sender|receiver) with ([^\\s]+) for .+");
+	private static final Pattern PAIRED = Pattern.compile("^AutoAuction transfer paired\\. You are (sender|receiver)\\. Sender: ([^.]+)\\. Receiver: ([^.]+)\\. Item: (.+)\\. Sender holds the transfer items and coins\\. Receiver starts clear of this item and does not hold the transfer coins\\. Sender runs /mf run <target> when both accounts are ready\\.$");
 
 	private TransferChatComponents() {
 	}
@@ -47,15 +47,54 @@ public final class TransferChatComponents {
 
 		Matcher paired = PAIRED.matcher(text);
 		if (paired.matches()) {
-			if ("sender".equalsIgnoreCase(paired.group(1))) {
+			String role = paired.group(1);
+			component = pairedComponent(role, paired.group(2), paired.group(3), paired.group(4));
+			if ("sender".equalsIgnoreCase(role)) {
 				component.append(buttonInline("Run", ChatFormatting.GOLD, new ClickEvent.SuggestCommand("/mf run "),
 					"Click to fill /mf run <target>", ChatFormatting.AQUA));
 			}
+			component.append(buttonInline("Switch", ChatFormatting.LIGHT_PURPLE, new ClickEvent.RunCommand("/mf switch"),
+				"Switch sender and receiver roles", ChatFormatting.LIGHT_PURPLE));
 			return component.append(buttonInline("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
 				"Cancel transfer session", ChatFormatting.RED));
 		}
 
 		return component;
+	}
+
+	private static MutableComponent pairedComponent(String role, String sender, String receiver, String itemName) {
+		MutableComponent component = Component.literal("AutoAuction transfer paired. You are ");
+		appendColored(component, role.toLowerCase(), roleColor(role), true);
+		component.append(Component.literal(". Sender: "));
+		appendColored(component, sender, ChatFormatting.GOLD, true);
+		component.append(Component.literal(". Receiver: "));
+		appendColored(component, receiver, ChatFormatting.AQUA, true);
+		component.append(Component.literal(". Item: "));
+		appendColored(component, itemName, ChatFormatting.YELLOW, true);
+		component.append(Component.literal(". "));
+		appendColored(component, "Sender", ChatFormatting.GOLD, true);
+		component.append(Component.literal(" holds the transfer "));
+		appendColored(component, "items", ChatFormatting.YELLOW, true);
+		component.append(Component.literal(" and "));
+		appendColored(component, "coins", ChatFormatting.GREEN, true);
+		component.append(Component.literal(". "));
+		appendColored(component, "Receiver", ChatFormatting.AQUA, true);
+		component.append(Component.literal(" starts clear of this item and does not hold the transfer "));
+		appendColored(component, "coins", ChatFormatting.GREEN, true);
+		component.append(Component.literal(". "));
+		appendColored(component, "Sender", ChatFormatting.GOLD, true);
+		component.append(Component.literal(" runs "));
+		appendColored(component, "/mf run <target>", ChatFormatting.GOLD, true);
+		component.append(Component.literal(" when both accounts are ready."));
+		return component;
+	}
+
+	private static ChatFormatting roleColor(String role) {
+		return "receiver".equalsIgnoreCase(role) ? ChatFormatting.AQUA : ChatFormatting.GOLD;
+	}
+
+	private static void appendColored(MutableComponent component, String text, ChatFormatting color, boolean bold) {
+		component.append(Component.literal(text).withStyle(style -> style.withColor(color).withBold(bold)));
 	}
 
 	private static MutableComponent buttonInline(String label, ChatFormatting color, ClickEvent clickEvent, String hoverText,

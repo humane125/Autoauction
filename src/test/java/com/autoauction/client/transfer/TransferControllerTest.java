@@ -81,7 +81,10 @@ class TransferControllerTest {
 		), TransferController.Role.SENDER);
 
 		assertEquals("AutoAuction transfer invite sent to ReceiverPlayer for ENCHANTED DIAMOND.", pending);
-		assertEquals("AutoAuction transfer paired as sender with ReceiverPlayer for ENCHANTED DIAMOND. Bazaar automation is waiting for menu dumps.", accepted);
+		assertEquals(
+			"AutoAuction transfer paired. You are sender. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready.",
+			accepted
+		);
 		assertEquals(TransferController.State.PAIRED, controller.state());
 		assertEquals(TransferController.Role.SENDER, controller.role());
 		assertTrue(controller.canRunAsSender());

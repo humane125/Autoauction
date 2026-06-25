@@ -53,15 +53,34 @@ class TransferChatComponentsTest {
 	@Test
 	void addsRunAndCancelButtonsForPairedSender() {
 		Component message = TransferChatComponents.forMessage(
-			"AutoAuction transfer paired as sender with ReceiverPlayer for ENCHANTED DIAMOND. Bazaar automation is waiting for menu dumps."
+			"AutoAuction transfer paired. You are sender. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready."
 		);
 
 		assertTrue(message.getString().contains(" [Run]"));
+		assertTrue(message.getString().contains(" [Switch]"));
 		assertTrue(message.getString().contains(" [Cancel]"));
 		assertEquals("/mf run ", clickCommand(message, "Run"));
+		assertEquals("/mf switch", clickCommand(message, "Switch"));
 		assertEquals("/mf cancel", clickCommand(message, "Cancel"));
 		assertInstanceOf(ClickEvent.SuggestCommand.class, clickEvent(message, "Run"));
+		assertInstanceOf(ClickEvent.RunCommand.class, clickEvent(message, "Switch"));
 		assertInstanceOf(ClickEvent.RunCommand.class, clickEvent(message, "Cancel"));
+		assertColoredText(message, "sender", ChatFormatting.GOLD);
+		assertColoredText(message, "Receiver", ChatFormatting.AQUA);
+		assertColoredText(message, "ENCHANTED DIAMOND", ChatFormatting.YELLOW);
+		assertColoredText(message, "coins", ChatFormatting.GREEN);
+	}
+
+	@Test
+	void addsSwitchAndCancelButtonsForPairedReceiverWithoutRun() {
+		Component message = TransferChatComponents.forMessage(
+			"AutoAuction transfer paired. You are receiver. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready."
+		);
+
+		assertTrue(!message.getString().contains(" [Run]"));
+		assertTrue(message.getString().contains(" [Switch]"));
+		assertTrue(message.getString().contains(" [Cancel]"));
+		assertEquals("/mf switch", clickCommand(message, "Switch"));
 	}
 
 	private static Component clickableSibling(Component component, String label) {
@@ -106,5 +125,25 @@ class TransferChatComponentsTest {
 		HoverEvent.ShowText showText = (HoverEvent.ShowText) hover;
 		assertEquals(text, showText.value().getString());
 		assertEquals(TextColor.fromLegacyFormat(color), showText.value().getStyle().getColor());
+	}
+
+	private static void assertColoredText(Component component, String text, ChatFormatting color) {
+		Component match = findText(component, text, TextColor.fromLegacyFormat(color));
+		if (match == null) {
+			throw new AssertionError("No " + color + " component containing " + text + " in " + component.getString());
+		}
+	}
+
+	private static Component findText(Component component, String text, TextColor color) {
+		if (component.getString().contains(text) && color.equals(component.getStyle().getColor())) {
+			return component;
+		}
+		for (Component sibling : component.getSiblings()) {
+			Component match = findText(sibling, text, color);
+			if (match != null) {
+				return match;
+			}
+		}
+		return null;
 	}
 }

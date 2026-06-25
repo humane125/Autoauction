@@ -483,6 +483,12 @@ public final class ModSocketClient implements AutoCloseable {
 		return sendTransferMessage(message);
 	}
 
+	public synchronized boolean switchTransfer() {
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "transfer_switch");
+		return sendTransferMessage(message);
+	}
+
 	public synchronized boolean runTransfer(int quantity) {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "transfer_run");

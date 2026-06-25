@@ -296,6 +296,7 @@ class ModSocketClientTest {
 		client.declineTransfer("SenderPlayer");
 		client.cancelTransfer();
 		client.runTransfer(128);
+		client.switchTransfer();
 		client.buyOrderReady(128);
 		client.sellOfferReady(128);
 		client.sellOfferBought(128);
@@ -312,6 +313,7 @@ class ModSocketClientTest {
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_cancel\"")));
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_run\"")
 			&& message.contains("\"quantity\":128")));
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_switch\"")));
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_buy_order_ready\"")
 			&& message.contains("\"quantity\":128")));
 		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"transfer_sell_offer_ready\"")
@@ -455,6 +457,7 @@ class ModSocketClientTest {
 		assertFalse(client.declineTransfer("SenderPlayer"));
 		assertFalse(client.cancelTransfer());
 		assertFalse(client.runTransfer(128));
+		assertFalse(client.switchTransfer());
 		assertFalse(client.buyOrderReady(128));
 		assertFalse(client.sellOfferReady(128));
 		assertFalse(client.sellOfferBought(128));
