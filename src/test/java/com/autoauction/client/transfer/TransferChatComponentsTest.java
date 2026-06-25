@@ -53,7 +53,7 @@ class TransferChatComponentsTest {
 	@Test
 	void addsRunAndCancelButtonsForPairedSender() {
 		Component message = TransferChatComponents.forMessage(
-			"AutoAuction transfer paired. You are sender. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready."
+			"AutoAuction transfer paired. You are sender for ENCHANTED DIAMOND with ReceiverPlayer. Keep the transfer items and coins on this account, then run /mf run <target> when ready."
 		);
 
 		assertTrue(message.getString().contains(" [Run]"));
@@ -66,21 +66,27 @@ class TransferChatComponentsTest {
 		assertInstanceOf(ClickEvent.RunCommand.class, clickEvent(message, "Switch"));
 		assertInstanceOf(ClickEvent.RunCommand.class, clickEvent(message, "Cancel"));
 		assertColoredText(message, "sender", ChatFormatting.GOLD);
-		assertColoredText(message, "Receiver", ChatFormatting.AQUA);
+		assertColoredText(message, "ReceiverPlayer", ChatFormatting.AQUA);
 		assertColoredText(message, "ENCHANTED DIAMOND", ChatFormatting.YELLOW);
 		assertColoredText(message, "coins", ChatFormatting.GREEN);
+		assertTrue(!message.getString().contains("Receiver starts clear"));
 	}
 
 	@Test
 	void addsSwitchAndCancelButtonsForPairedReceiverWithoutRun() {
 		Component message = TransferChatComponents.forMessage(
-			"AutoAuction transfer paired. You are receiver. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready."
+			"AutoAuction transfer paired. You are receiver for ENCHANTED DIAMOND with SenderPlayer. Start clear of this item and do not hold the transfer coins; wait for the sender to run /mf run <target>."
 		);
 
 		assertTrue(!message.getString().contains(" [Run]"));
 		assertTrue(message.getString().contains(" [Switch]"));
 		assertTrue(message.getString().contains(" [Cancel]"));
 		assertEquals("/mf switch", clickCommand(message, "Switch"));
+		assertColoredText(message, "receiver", ChatFormatting.AQUA);
+		assertColoredText(message, "SenderPlayer", ChatFormatting.GOLD);
+		assertColoredText(message, "ENCHANTED DIAMOND", ChatFormatting.YELLOW);
+		assertColoredText(message, "coins", ChatFormatting.GREEN);
+		assertTrue(!message.getString().contains("Keep the transfer items"));
 	}
 
 	private static Component clickableSibling(Component component, String label) {

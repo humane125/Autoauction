@@ -13,7 +13,8 @@ public final class TransferChatComponents {
 	private static final Pattern ACCOUNT_LINE = Pattern.compile("^-\\s+([^\\s]+)\\s+\\(([^)]*)\\)$");
 	private static final Pattern INCOMING_INVITE = Pattern.compile("^AutoAuction transfer invite from ([^\\s]+) for .+");
 	private static final Pattern PENDING_INVITE = Pattern.compile("^AutoAuction transfer invite sent to ([^\\s]+) for .+");
-	private static final Pattern PAIRED = Pattern.compile("^AutoAuction transfer paired\\. You are (sender|receiver)\\. Sender: ([^.]+)\\. Receiver: ([^.]+)\\. Item: (.+)\\. Sender holds the transfer items and coins\\. Receiver starts clear of this item and does not hold the transfer coins\\. Sender runs /mf run <target> when both accounts are ready\\.$");
+	private static final Pattern PAIRED_SENDER = Pattern.compile("^AutoAuction transfer paired\\. You are sender for (.+) with ([^.]+)\\. Keep the transfer items and coins on this account, then run /mf run <target> when ready\\.$");
+	private static final Pattern PAIRED_RECEIVER = Pattern.compile("^AutoAuction transfer paired\\. You are receiver for (.+) with ([^.]+)\\. Start clear of this item and do not hold the transfer coins; wait for the sender to run /mf run <target>\\.$");
 
 	private TransferChatComponents() {
 	}
@@ -45,14 +46,20 @@ public final class TransferChatComponents {
 				"Cancel pending transfer", ChatFormatting.RED));
 		}
 
-		Matcher paired = PAIRED.matcher(text);
-		if (paired.matches()) {
-			String role = paired.group(1);
-			component = pairedComponent(role, paired.group(2), paired.group(3), paired.group(4));
-			if ("sender".equalsIgnoreCase(role)) {
-				component.append(buttonInline("Run", ChatFormatting.GOLD, new ClickEvent.SuggestCommand("/mf run "),
-					"Click to fill /mf run <target>", ChatFormatting.AQUA));
-			}
+		Matcher pairedSender = PAIRED_SENDER.matcher(text);
+		if (pairedSender.matches()) {
+			component = pairedSenderComponent(pairedSender.group(1), pairedSender.group(2));
+			component.append(buttonInline("Run", ChatFormatting.GOLD, new ClickEvent.SuggestCommand("/mf run "),
+				"Click to fill /mf run <target>", ChatFormatting.AQUA));
+			component.append(buttonInline("Switch", ChatFormatting.LIGHT_PURPLE, new ClickEvent.RunCommand("/mf switch"),
+				"Switch sender and receiver roles", ChatFormatting.LIGHT_PURPLE));
+			return component.append(buttonInline("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
+				"Cancel transfer session", ChatFormatting.RED));
+		}
+
+		Matcher pairedReceiver = PAIRED_RECEIVER.matcher(text);
+		if (pairedReceiver.matches()) {
+			component = pairedReceiverComponent(pairedReceiver.group(1), pairedReceiver.group(2));
 			component.append(buttonInline("Switch", ChatFormatting.LIGHT_PURPLE, new ClickEvent.RunCommand("/mf switch"),
 				"Switch sender and receiver roles", ChatFormatting.LIGHT_PURPLE));
 			return component.append(buttonInline("Cancel", ChatFormatting.RED, new ClickEvent.RunCommand("/mf cancel"),
@@ -62,35 +69,36 @@ public final class TransferChatComponents {
 		return component;
 	}
 
-	private static MutableComponent pairedComponent(String role, String sender, String receiver, String itemName) {
+	private static MutableComponent pairedSenderComponent(String itemName, String receiver) {
 		MutableComponent component = Component.literal("AutoAuction transfer paired. You are ");
-		appendColored(component, role.toLowerCase(), roleColor(role), true);
-		component.append(Component.literal(". Sender: "));
-		appendColored(component, sender, ChatFormatting.GOLD, true);
-		component.append(Component.literal(". Receiver: "));
-		appendColored(component, receiver, ChatFormatting.AQUA, true);
-		component.append(Component.literal(". Item: "));
+		appendColored(component, "sender", ChatFormatting.GOLD, true);
+		component.append(Component.literal(" for "));
 		appendColored(component, itemName, ChatFormatting.YELLOW, true);
-		component.append(Component.literal(". "));
-		appendColored(component, "Sender", ChatFormatting.GOLD, true);
-		component.append(Component.literal(" holds the transfer "));
+		component.append(Component.literal(" with "));
+		appendColored(component, receiver, ChatFormatting.AQUA, true);
+		component.append(Component.literal(". Keep the transfer "));
 		appendColored(component, "items", ChatFormatting.YELLOW, true);
 		component.append(Component.literal(" and "));
 		appendColored(component, "coins", ChatFormatting.GREEN, true);
-		component.append(Component.literal(". "));
-		appendColored(component, "Receiver", ChatFormatting.AQUA, true);
-		component.append(Component.literal(" starts clear of this item and does not hold the transfer "));
-		appendColored(component, "coins", ChatFormatting.GREEN, true);
-		component.append(Component.literal(". "));
-		appendColored(component, "Sender", ChatFormatting.GOLD, true);
-		component.append(Component.literal(" runs "));
+		component.append(Component.literal(" on this account, then run "));
 		appendColored(component, "/mf run <target>", ChatFormatting.GOLD, true);
-		component.append(Component.literal(" when both accounts are ready."));
+		component.append(Component.literal(" when ready."));
 		return component;
 	}
 
-	private static ChatFormatting roleColor(String role) {
-		return "receiver".equalsIgnoreCase(role) ? ChatFormatting.AQUA : ChatFormatting.GOLD;
+	private static MutableComponent pairedReceiverComponent(String itemName, String sender) {
+		MutableComponent component = Component.literal("AutoAuction transfer paired. You are ");
+		appendColored(component, "receiver", ChatFormatting.AQUA, true);
+		component.append(Component.literal(" for "));
+		appendColored(component, itemName, ChatFormatting.YELLOW, true);
+		component.append(Component.literal(" with "));
+		appendColored(component, sender, ChatFormatting.GOLD, true);
+		component.append(Component.literal(". Start clear of this item and do not hold the transfer "));
+		appendColored(component, "coins", ChatFormatting.GREEN, true);
+		component.append(Component.literal("; wait for the sender to run "));
+		appendColored(component, "/mf run <target>", ChatFormatting.GOLD, true);
+		component.append(Component.literal("."));
+		return component;
 	}
 
 	private static void appendColored(MutableComponent component, String text, ChatFormatting color, boolean bold) {

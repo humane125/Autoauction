@@ -82,13 +82,32 @@ class TransferControllerTest {
 
 		assertEquals("AutoAuction transfer invite sent to ReceiverPlayer for ENCHANTED DIAMOND.", pending);
 		assertEquals(
-			"AutoAuction transfer paired. You are sender. Sender: SenderPlayer. Receiver: ReceiverPlayer. Item: ENCHANTED DIAMOND. Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins. Sender runs /mf run <target> when both accounts are ready.",
+			"AutoAuction transfer paired. You are sender for ENCHANTED DIAMOND with ReceiverPlayer. Keep the transfer items and coins on this account, then run /mf run <target> when ready.",
 			accepted
 		);
 		assertEquals(TransferController.State.PAIRED, controller.state());
 		assertEquals(TransferController.Role.SENDER, controller.role());
 		assertTrue(controller.canRunAsSender());
 		assertEquals("ENCHANTED DIAMOND", controller.session().itemName());
+	}
+
+	@Test
+	void acceptedReceiverMessageOnlyExplainsReceiverRole() {
+		TransferController controller = new TransferController();
+
+		String accepted = controller.accepted(new TransferController.Session(
+			"s1",
+			"SenderPlayer",
+			"ReceiverPlayer",
+			"ENCHANTED DIAMOND"
+		), TransferController.Role.RECEIVER);
+
+		assertEquals(
+			"AutoAuction transfer paired. You are receiver for ENCHANTED DIAMOND with SenderPlayer. Start clear of this item and do not hold the transfer coins; wait for the sender to run /mf run <target>.",
+			accepted
+		);
+		assertEquals(TransferController.Role.RECEIVER, controller.role());
+		assertFalse(controller.canRunAsSender());
 	}
 
 	@Test

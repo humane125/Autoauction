@@ -2,7 +2,6 @@ package com.autoauction.client.transfer;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 public final class TransferController {
 	private State state = State.IDLE;
@@ -44,12 +43,14 @@ public final class TransferController {
 		this.session = nextSession;
 		this.role = nextRole;
 		this.state = State.PAIRED;
-		return "AutoAuction transfer paired. You are " + nextRole.name().toLowerCase(Locale.ROOT)
-			+ ". Sender: " + nextSession.senderUsername()
-			+ ". Receiver: " + nextSession.receiverUsername()
-			+ ". Item: " + nextSession.itemName()
-			+ ". Sender holds the transfer items and coins. Receiver starts clear of this item and does not hold the transfer coins."
-			+ " Sender runs /mf run <target> when both accounts are ready.";
+		if (nextRole == Role.SENDER) {
+			return "AutoAuction transfer paired. You are sender for " + nextSession.itemName()
+				+ " with " + nextSession.receiverUsername()
+				+ ". Keep the transfer items and coins on this account, then run /mf run <target> when ready.";
+		}
+		return "AutoAuction transfer paired. You are receiver for " + nextSession.itemName()
+			+ " with " + nextSession.senderUsername()
+			+ ". Start clear of this item and do not hold the transfer coins; wait for the sender to run /mf run <target>.";
 	}
 
 	public String declined(String reason) {
