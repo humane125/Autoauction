@@ -921,7 +921,11 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (macroController != null) {
 			NebulaMacroController.ObservedState beforeState = macroController.observedState();
 			boolean beforeDesiredOn = macroController.desiredOn();
-			macroController.onChatMessage(text);
+			if (nebulaGuiInputTracker.maybeOpen()) {
+				macroController.onGuiChatMessage(text);
+			} else {
+				macroController.onChatMessage(text);
+			}
 			reportNebulaMacroIntentIfChanged(beforeState, beforeDesiredOn);
 		}
 	}

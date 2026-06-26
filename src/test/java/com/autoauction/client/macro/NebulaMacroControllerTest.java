@@ -163,6 +163,23 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void nebulaGuiDisabledMessageClearsDesiredOnAndSuppressesAutoRestore() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+		assertTrue(controller.desiredOn());
+
+		controller.onGuiChatMessage("NebulaClient > Combat Macro: Disabled");
+
+		assertFalse(controller.desiredOn());
+		assertEquals(NebulaMacroController.ObservedState.OFF, controller.observedState());
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(), commands);
+	}
+
+	@Test
 	void manualToggleOnKeepsAutoRestoreEnabled() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();

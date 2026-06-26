@@ -40,6 +40,13 @@ public final class NebulaMacroController {
 		applyPendingManualToggleResult();
 	}
 
+	public void onGuiChatMessage(String message) {
+		onChatMessage(message);
+		if (observedState == ObservedState.OFF) {
+			recordManualDisableIntent();
+		}
+	}
+
 	public EnsureResult ensureOn(Consumer<String> commandSink, long nowMs) {
 		desiredOn = true;
 		if (observedState == ObservedState.ON) {
