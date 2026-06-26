@@ -142,6 +142,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
 	private TransferLoopGoal transferLoopGoal;
+	private NebulaMacroController.ObservedState lastNebulaDebugObservedState = NebulaMacroController.ObservedState.UNKNOWN;
+	private boolean lastNebulaDebugDesiredOn;
 	private String senderParkedItemName;
 	private int senderParkedStacks;
 	private PendingHandoff pendingHandoff;
@@ -907,7 +909,25 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void handleMacroChatMessage(String text) {
 		if (macroController != null) {
+			NebulaMacroController.ObservedState beforeState = macroController.observedState();
+			boolean beforeDesiredOn = macroController.desiredOn();
 			macroController.onChatMessage(text);
+			reportNebulaMacroIntentIfChanged(beforeState, beforeDesiredOn);
+		}
+	}
+
+	private void reportNebulaMacroIntentIfChanged(NebulaMacroController.ObservedState beforeState, boolean beforeDesiredOn) {
+		NebulaMacroController.ObservedState observedState = macroController.observedState();
+		boolean desiredOn = macroController.desiredOn();
+		if (observedState == beforeState && desiredOn == beforeDesiredOn
+			&& observedState == lastNebulaDebugObservedState && desiredOn == lastNebulaDebugDesiredOn) {
+			return;
+		}
+		lastNebulaDebugObservedState = observedState;
+		lastNebulaDebugDesiredOn = desiredOn;
+		if (observedState == NebulaMacroController.ObservedState.OFF && !desiredOn) {
+			sendRemoteDebugLog("info", "nebula",
+				"Nebula combat macro disabled observed; auto-retoggle idle because desired state is OFF/manual disable intent.");
 		}
 	}
 

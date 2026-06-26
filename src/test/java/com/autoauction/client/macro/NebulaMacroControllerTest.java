@@ -107,6 +107,19 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void observedEnabledAloneDoesNotMakeAutoRestoreDesired() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertFalse(controller.desiredOn());
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(), commands);
+	}
+
+	@Test
 	void manualToggleIntentSuppressesAutoRestore() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();
