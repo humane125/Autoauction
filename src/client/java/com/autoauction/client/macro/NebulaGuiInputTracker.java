@@ -9,7 +9,7 @@ public final class NebulaGuiInputTracker {
 		boolean opened = false;
 		if (escapeDown && !escapeWasDown) {
 			maybeOpen = false;
-		} else if (guiKeyDown && !guiKeyWasDown) {
+		} else if (!minecraftScreenOpen && guiKeyDown && !guiKeyWasDown) {
 			maybeOpen = true;
 			opened = true;
 		}

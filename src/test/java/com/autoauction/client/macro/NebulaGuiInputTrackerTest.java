@@ -39,10 +39,11 @@ class NebulaGuiInputTrackerTest {
 	}
 
 	@Test
-	void guiKeyPressIsTrackedEvenIfMinecraftScreenIsAlreadyOpen() {
+	void ignoresGuiKeyPressWhileMinecraftScreenIsAlreadyOpen() {
 		NebulaGuiInputTracker tracker = new NebulaGuiInputTracker();
 
-		assertTrue(tracker.tick(true, true, false));
+		assertFalse(tracker.tick(true, true, false));
 		assertTrue(tracker.blocksMacroIntent(true));
+		assertFalse(tracker.blocksMacroIntent(false));
 	}
 }
