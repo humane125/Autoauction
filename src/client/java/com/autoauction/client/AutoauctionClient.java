@@ -110,6 +110,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int REMOTE_SCREENSHOT_MAX_HEIGHT = 720;
 
 	private AutoAuctionConfig config;
+	private AutoAuctionConfigStore configStore;
 	private AuctionAutomationController controller;
 	private MinecraftGameActions actions;
 	private AuctionApiClient apiClient;
@@ -148,7 +149,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		try {
-			this.config = new AutoAuctionConfigStore(FabricLoader.getInstance().getConfigDir()).load();
+			this.configStore = new AutoAuctionConfigStore(FabricLoader.getInstance().getConfigDir());
+			this.config = configStore.load();
 			this.controller = new AuctionAutomationController(config);
 			this.actions = new MinecraftGameActions();
 			this.apiClient = new AuctionApiClient(config);
@@ -935,7 +937,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			case DISABLING -> "Manual Nebula combat macro disable detected from " + source + "; auto-retoggle paused.";
 			case UNKNOWN -> "Manual Nebula combat macro toggle detected from " + source + "; waiting for Nebula status.";
 		};
-		sendRemoteClientLog("info", "nebula", message);
+		sendRemoteDebugLog("info", "nebula", message);
 	}
 
 	private void autoRestoreNebulaMacroIfNeeded(Minecraft client) {
@@ -947,8 +949,8 @@ public class AutoauctionClient implements ClientModInitializer {
 			System.currentTimeMillis()
 		);
 		switch (result) {
-			case STARTED -> sendRemoteClientLog("warn", "nebula", "Nebula combat macro disabled while desired on; retoggling.");
-			case FAILED -> sendRemoteClientLog("error", "nebula", "Nebula combat macro auto-retoggle timed out; will retry.");
+			case STARTED -> sendRemoteDebugLog("warn", "nebula", "Nebula combat macro disabled while desired on; retoggling.");
+			case FAILED -> sendRemoteDebugLog("error", "nebula", "Nebula combat macro auto-retoggle timed out; will retry.");
 			default -> {
 			}
 		}
@@ -962,7 +964,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		try {
 			for (String message : nebulaLatestLogWatcher.pollMacroMessages()) {
 				handleMacroChatMessage(message);
-				sendRemoteClientLog("info", "nebula", NebulaLatestLogWatcher.displayMessage(message));
+				sendRemoteDebugLog("info", "nebula", NebulaLatestLogWatcher.displayMessage(message));
 			}
 		} catch (Exception error) {
 			Autoauction.LOGGER.debug("AutoAuction could not poll latest.log for Nebula macro messages", error);
@@ -976,6 +978,12 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void sendRemoteClientLog(String level, String source, String message) {
 		if (modSocketClient != null && !modSocketClient.sendClientLog(level, source, message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
+		}
+	}
+
+	private void sendRemoteDebugLog(String level, String source, String message) {
+		if (isDebugEnabled()) {
+			sendRemoteClientLog(level, source, message);
 		}
 	}
 
@@ -1105,7 +1113,18 @@ public class AutoauctionClient implements ClientModInitializer {
 					sendFeedback(context.getSource(), line);
 				}
 				return 1;
-			}));
+			}))
+			.then(literal("debug")
+				.executes(context -> {
+					sendFeedback(context.getSource(), debugStatusMessage());
+					return 1;
+				})
+				.then(literal("on").executes(context -> setDebugEnabled(context.getSource(), true)))
+				.then(literal("off").executes(context -> setDebugEnabled(context.getSource(), false)))
+				.then(literal("status").executes(context -> {
+					sendFeedback(context.getSource(), debugStatusMessage());
+					return 1;
+				})));
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> autoauctionTestCommand() {
@@ -1144,6 +1163,37 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendFeedback(context.getSource(), "AutoAuction dumped scoreboard=" + counts.scoreboardLines() + " tablist=" + counts.tabListLines() + " to latest.log.");
 				return 1;
 			}));
+	}
+
+	private int setDebugEnabled(FabricClientCommandSource source, boolean enabled) {
+		config = config.withDebugEnabled(enabled);
+		try {
+			configStore.save(config);
+		} catch (Exception error) {
+			Autoauction.LOGGER.error("AutoAuction failed to save debug config", error);
+			sendFeedback(source, "AutoAuction debug " + (enabled ? "on" : "off") + " failed: could not save config.");
+			return 0;
+		}
+		sendFeedback(source, "AutoAuction debug is now " + (enabled ? "ON" : "OFF") + ".");
+		return 1;
+	}
+
+	private String debugStatusMessage() {
+		return "AutoAuction debug is " + (isDebugEnabled() ? "ON" : "OFF") + ".";
+	}
+
+	private boolean isDebugEnabled() {
+		return config != null && config.debugEnabled();
+	}
+
+	private void sendDebugFeedback(Minecraft client, String message) {
+		if (!isDebugEnabled()) {
+			return;
+		}
+		Autoauction.LOGGER.info(message);
+		if (client.player != null) {
+			client.player.sendSystemMessage(Component.literal(message));
+		}
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> moneyTransferCommand() {
@@ -1476,10 +1526,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				+ " purse before=" + formatCoins(summary.before())
 				+ " after=" + formatCoins(summary.after())
 				+ " delta=" + formatSignedCoins(summary.delta()) + ".";
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		});
 		return result;
 	}
@@ -1890,14 +1937,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("receiver", "buy-order", next.name(), quantity, itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("receiver", "buy-order", next.name(), quantity, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -1909,10 +1955,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = ReceiverBuyOrderState.DONE;
 			receiverBuyOrderWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2097,14 +2140,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("receiver", "sell-offer", next.name(), quantity, itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("receiver", "sell-offer", next.name(), quantity, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -2116,10 +2158,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = ReceiverSellOfferState.DONE;
 			receiverSellOfferWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2333,14 +2372,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("sender", "prepare", next.name(), plan == null ? 0 : plan.transferQuantity(), itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("sender", "prepare", next.name(), plan == null ? 0 : plan.transferQuantity(), itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -2352,10 +2390,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = SenderPrepareTransferState.DONE;
 			senderPrepareTransferWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2456,15 +2491,14 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("sender", "restore-ec", next.name(),
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("sender", "restore-ec", next.name(),
 				stacksToRestore * EnderChestParkingPlan.STACK_SIZE, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -2478,10 +2512,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			senderEnderChestRestoreWorkflow = null;
 			senderParkedItemName = null;
 			senderParkedStacks = 0;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2597,14 +2628,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("sender", "instant-sell", next.name(), quantity, itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("sender", "instant-sell", next.name(), quantity, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -2616,10 +2646,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = SenderInstantSellState.DONE;
 			senderInstantSellWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2824,14 +2851,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("sender", "instant-buy", next.name(), quantity, itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("sender", "instant-buy", next.name(), quantity, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -2843,10 +2869,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = SenderInstantBuyState.DONE;
 			senderInstantBuyWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -2983,14 +3006,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
-			Autoauction.LOGGER.info(transferState("receiver", "claim-coins", next.name(), quantity, itemName, delayMs));
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("receiver", "claim-coins", next.name(), quantity, itemName, delayMs));
+			}
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void timeout(Minecraft client, int timeoutMs, String message) {
@@ -3002,10 +3024,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = ReceiverClaimSellOfferState.DONE;
 			receiverClaimSellOfferWorkflow = null;
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -3476,14 +3495,18 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt + Math.max(delayMs, effectiveClickDelayMs());
-			Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
+			}
 		}
 
 		private void transitionNow(RealAuctionState next, Minecraft client) {
 			state = next;
 			stateStartedAt = System.currentTimeMillis();
 			nextActionAt = stateStartedAt;
-			Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info("AutoAuction real workflow state: {}", next);
+			}
 		}
 
 		private void delay() {
@@ -3511,10 +3534,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private void debug(Minecraft client, String message) {
-			Autoauction.LOGGER.info(message);
-			if (client.player != null) {
-				client.player.sendSystemMessage(Component.literal(message));
-			}
+			sendDebugFeedback(client, message);
 		}
 	}
 

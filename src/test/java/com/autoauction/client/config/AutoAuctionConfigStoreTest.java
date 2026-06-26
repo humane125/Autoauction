@@ -23,12 +23,14 @@ class AutoAuctionConfigStoreTest {
 
 		assertEquals("https://lazy-similarly-reaffirm.ngrok-free.dev", config.apiBaseUrl());
 		assertTrue(config.enabledByDefault());
+		assertFalse(config.debugEnabled());
 		assertEquals("", config.macroStartCommand());
 		assertEquals("P", config.nebulaMacroToggleKey());
 		assertEquals(25000, config.killThreshold());
 		assertTrue(Files.exists(tempDir.resolve("autoauction.json")));
 		assertTrue(json.contains("\"macroStartCommand\""));
 		assertTrue(json.contains("\"nebulaMacroToggleKey\""));
+		assertTrue(json.contains("\"debugEnabled\""));
 		assertFalse(json.contains("dryRun"));
 		assertFalse(json.contains("privateServerOnly"));
 		assertFalse(json.contains("allowedServers"));
@@ -75,9 +77,11 @@ class AutoAuctionConfigStoreTest {
 		assertEquals("token", config.apiToken());
 		assertEquals("", config.macroStartCommand());
 		assertEquals("P", config.nebulaMacroToggleKey());
+		assertFalse(config.debugEnabled());
 		assertTrue(config.enabledByDefault());
 		assertTrue(json.contains("\"macroStartCommand\""));
 		assertTrue(json.contains("\"nebulaMacroToggleKey\""));
+		assertTrue(json.contains("\"debugEnabled\""));
 		assertFalse(json.contains("dryRun"));
 		assertFalse(json.contains("privateServerOnly"));
 		assertFalse(json.contains("allowedServers"));

@@ -588,7 +588,7 @@ class ModSocketClientTest {
 	}
 
 	private AutoAuctionConfig config(String baseUrl, String apiKey) {
-		return new AutoAuctionConfig(baseUrl, apiKey, "", "", "/stopmacro", "", "P", "/hub", true, 25_000, 8_000, 250, 5_000);
+		return new AutoAuctionConfig(baseUrl, apiKey, "", "", "/stopmacro", "", "P", "/hub", true, false, 25_000, 8_000, 250, 5_000);
 	}
 
 	private static final class FakeTransport implements ModSocketClient.Transport {
