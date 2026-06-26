@@ -347,6 +347,9 @@ public class AutoauctionClient implements ClientModInitializer {
 			sendRemoteClientLog("warn", "Remote client command skipped: empty command");
 			return;
 		}
+		if (NebulaMacroController.isToggleCommand(command)) {
+			recordManualMacroToggleIntent("remote client command");
+		}
 		boolean handled = actions.sendClientCommand(client, command);
 		if (handled) {
 			sendRemoteClientLog("info", "Remote client command sent: /" + command);
