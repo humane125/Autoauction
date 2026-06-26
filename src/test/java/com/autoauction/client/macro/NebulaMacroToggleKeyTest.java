@@ -71,4 +71,42 @@ class NebulaMacroToggleKeyTest {
 
 		assertEquals(OptionalInt.empty(), NebulaMacroToggleKey.resolveFromGameDirectory(tempDir));
 	}
+
+	@Test
+	void resolvesGuiKeyCodeFromNebulaRootConfigUnderGameDirectory() throws Exception {
+		Path config = tempDir.resolve("Nebula").resolve("config.json");
+		Files.createDirectories(config.getParent());
+		Files.writeString(config, """
+			{
+			  "GUI": {
+			    "Open GUI Keybind": {
+			      "type": "KEYSYM",
+			      "code": 344
+			    }
+			  }
+			}
+			""", StandardCharsets.UTF_8);
+
+		assertEquals(OptionalInt.of(GLFW.GLFW_KEY_RIGHT_SHIFT), NebulaMacroToggleKey.resolveGuiFromGameDirectory(tempDir));
+	}
+
+	@Test
+	void rejectsMissingOrDisabledNebulaGuiKeyConfig() throws Exception {
+		assertEquals(OptionalInt.empty(), NebulaMacroToggleKey.resolveGuiFromGameDirectory(tempDir));
+
+		Path config = tempDir.resolve("Nebula").resolve("config.json");
+		Files.createDirectories(config.getParent());
+		Files.writeString(config, """
+			{
+			  "GUI": {
+			    "Open GUI Keybind": {
+			      "type": "KEYSYM",
+			      "code": -1
+			    }
+			  }
+			}
+			""", StandardCharsets.UTF_8);
+
+		assertEquals(OptionalInt.empty(), NebulaMacroToggleKey.resolveGuiFromGameDirectory(tempDir));
+	}
 }

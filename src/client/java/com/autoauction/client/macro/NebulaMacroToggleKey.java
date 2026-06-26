@@ -47,14 +47,31 @@ public final class NebulaMacroToggleKey {
 			return OptionalInt.empty();
 		}
 		JsonObject root = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8)).getAsJsonObject();
-		if (!root.has("Combat Macro") || !root.get("Combat Macro").isJsonObject()) {
+		return resolveKeybind(root, "Combat Macro", "Toggle Combat Macro");
+	}
+
+	public static OptionalInt resolveGuiFromGameDirectory(Path gameDirectory) throws IOException {
+		Path configPath = guiConfigPath(gameDirectory);
+		if (!Files.exists(configPath)) {
 			return OptionalInt.empty();
 		}
-		JsonObject combatMacro = root.getAsJsonObject("Combat Macro");
-		if (!combatMacro.has("Toggle Combat Macro") || !combatMacro.get("Toggle Combat Macro").isJsonObject()) {
+		JsonObject root = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8)).getAsJsonObject();
+		return resolveKeybind(root, "GUI", "Open GUI Keybind");
+	}
+
+	public static Path guiConfigPath(Path gameDirectory) {
+		return gameDirectory.resolve("Nebula").resolve("config.json");
+	}
+
+	private static OptionalInt resolveKeybind(JsonObject root, String sectionName, String keybindName) {
+		if (!root.has(sectionName) || !root.get(sectionName).isJsonObject()) {
 			return OptionalInt.empty();
 		}
-		JsonObject toggle = combatMacro.getAsJsonObject("Toggle Combat Macro");
+		JsonObject section = root.getAsJsonObject(sectionName);
+		if (!section.has(keybindName) || !section.get(keybindName).isJsonObject()) {
+			return OptionalInt.empty();
+		}
+		JsonObject toggle = section.getAsJsonObject(keybindName);
 		if (!toggle.has("type") || !toggle.get("type").isJsonPrimitive()
 			|| !"KEYSYM".equalsIgnoreCase(toggle.get("type").getAsString())) {
 			return OptionalInt.empty();
@@ -63,7 +80,8 @@ public final class NebulaMacroToggleKey {
 			|| !toggle.get("code").getAsJsonPrimitive().isNumber()) {
 			return OptionalInt.empty();
 		}
-		return OptionalInt.of(toggle.get("code").getAsInt());
+		int code = toggle.get("code").getAsInt();
+		return code >= 0 ? OptionalInt.of(code) : OptionalInt.empty();
 	}
 
 	public static Path configPath(Path gameDirectory) {

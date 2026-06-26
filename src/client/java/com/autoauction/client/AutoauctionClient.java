@@ -19,6 +19,7 @@ import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
+import com.autoauction.client.macro.NebulaGuiInputTracker;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.macro.NebulaMacroToggleKey;
@@ -122,11 +123,15 @@ public class AutoauctionClient implements ClientModInitializer {
 	private AltManagerHandoffClient handoffClient;
 	private NebulaMacroController macroController;
 	private NebulaLatestLogWatcher nebulaLatestLogWatcher;
+	private final NebulaGuiInputTracker nebulaGuiInputTracker = new NebulaGuiInputTracker();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
 	private boolean sendingAutoAuctionMacroToggleCommand;
 	private boolean nebulaMacroKeybindWasDown;
+	private Path cachedNebulaGuiConfigPath;
+	private long cachedNebulaGuiConfigModifiedAt = Long.MIN_VALUE;
+	private OptionalInt cachedNebulaGuiKeyCode = OptionalInt.empty();
 	private Path cachedNebulaMacroConfigPath;
 	private long cachedNebulaMacroConfigModifiedAt = Long.MIN_VALUE;
 	private OptionalInt cachedNebulaMacroConfigKeyCode = OptionalInt.empty();
@@ -192,6 +197,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					return;
 				}
 
+				observeNebulaGuiKeybind(client);
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
 				handleDumpSlotsHotkey(client);
@@ -935,6 +941,41 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private void observeNebulaGuiKeybind(Minecraft client) {
+		OptionalInt keyCode = resolveCachedNebulaGuiKey(client);
+		boolean guiKeyDown = keyCode.isPresent()
+			&& GLFW.glfwGetKey(client.getWindow().handle(), keyCode.getAsInt()) == GLFW.GLFW_PRESS;
+		boolean escapeDown = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_ESCAPE) == GLFW.GLFW_PRESS;
+		nebulaGuiInputTracker.tick(client.screen != null, guiKeyDown, escapeDown);
+	}
+
+	private OptionalInt resolveCachedNebulaGuiKey(Minecraft client) {
+		Path configPath = NebulaMacroToggleKey.guiConfigPath(client.gameDirectory.toPath());
+		long modifiedAt = Long.MIN_VALUE;
+		try {
+			if (Files.exists(configPath)) {
+				modifiedAt = Files.getLastModifiedTime(configPath).toMillis();
+			}
+			if (configPath.equals(cachedNebulaGuiConfigPath) && modifiedAt == cachedNebulaGuiConfigModifiedAt) {
+				return cachedNebulaGuiKeyCode;
+			}
+			cachedNebulaGuiConfigPath = configPath;
+			cachedNebulaGuiConfigModifiedAt = modifiedAt;
+			cachedNebulaGuiKeyCode = NebulaMacroToggleKey.resolveGuiFromGameDirectory(client.gameDirectory.toPath());
+			if (cachedNebulaGuiKeyCode.isPresent()) {
+				sendRemoteDebugLog("info", "nebula",
+					"Loaded Nebula GUI key code " + cachedNebulaGuiKeyCode.getAsInt() + " from " + configPath);
+			}
+		} catch (Exception error) {
+			cachedNebulaGuiConfigPath = configPath;
+			cachedNebulaGuiConfigModifiedAt = modifiedAt;
+			cachedNebulaGuiKeyCode = OptionalInt.empty();
+			sendRemoteDebugLog("warn", "nebula", "Could not load Nebula GUI key from " + configPath + ".");
+			Autoauction.LOGGER.debug("AutoAuction could not load Nebula GUI key config", error);
+		}
+		return cachedNebulaGuiKeyCode;
+	}
+
 	private void observeNebulaMacroKeybind(Minecraft client) {
 		if (config == null) {
 			return;
@@ -945,6 +986,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), resolvedKey.keyCode().getAsInt()) == GLFW.GLFW_PRESS;
+		if (nebulaGuiInputTracker.blocksMacroIntent(client.screen != null)) {
+			nebulaMacroKeybindWasDown = isDown;
+			return;
+		}
 		if (isDown && !nebulaMacroKeybindWasDown) {
 			recordManualMacroToggleIntent(resolvedKey.source());
 		}
