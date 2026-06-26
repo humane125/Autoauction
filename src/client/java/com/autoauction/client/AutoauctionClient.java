@@ -970,14 +970,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			cachedNebulaGuiConfigModifiedAt = modifiedAt;
 			cachedNebulaGuiKeyCode = NebulaMacroToggleKey.resolveGuiFromGameDirectory(client.gameDirectory.toPath());
 			if (cachedNebulaGuiKeyCode.isPresent()) {
-				sendRemoteDebugLog("info", "nebula",
-					"Loaded Nebula GUI key code " + cachedNebulaGuiKeyCode.getAsInt() + " from " + configPath);
+				sendRemoteDebugLog("info", "nebula", nebulaGuiKeyLoadedMessage(cachedNebulaGuiKeyCode.getAsInt()));
 			}
 		} catch (Exception error) {
 			cachedNebulaGuiConfigPath = configPath;
 			cachedNebulaGuiConfigModifiedAt = modifiedAt;
 			cachedNebulaGuiKeyCode = OptionalInt.empty();
-			sendRemoteDebugLog("warn", "nebula", "Could not load Nebula GUI key from " + configPath + ".");
+			sendRemoteDebugLog("warn", "nebula", nebulaGuiKeyLoadFailedMessage());
 			Autoauction.LOGGER.debug("AutoAuction could not load Nebula GUI key config", error);
 		}
 		return cachedNebulaGuiKeyCode;
@@ -1026,15 +1025,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			cachedNebulaMacroConfigModifiedAt = modifiedAt;
 			cachedNebulaMacroConfigKeyCode = NebulaMacroToggleKey.resolveFromGameDirectory(client.gameDirectory.toPath());
 			if (cachedNebulaMacroConfigKeyCode.isPresent()) {
-				sendRemoteDebugLog("info", "nebula",
-					"Loaded Nebula combat macro key code " + cachedNebulaMacroConfigKeyCode.getAsInt() + " from " + configPath);
+				sendRemoteDebugLog("info", "nebula", nebulaCombatMacroKeyLoadedMessage(cachedNebulaMacroConfigKeyCode.getAsInt()));
 			}
 		} catch (Exception error) {
 			cachedNebulaMacroConfigPath = configPath;
 			cachedNebulaMacroConfigModifiedAt = modifiedAt;
 			cachedNebulaMacroConfigKeyCode = OptionalInt.empty();
-			sendRemoteDebugLog("warn", "nebula",
-				"Could not load Nebula combat macro key from " + configPath + "; falling back to autoauction.json.");
+			sendRemoteDebugLog("warn", "nebula", nebulaCombatMacroKeyLoadFailedMessage());
 			Autoauction.LOGGER.debug("AutoAuction could not load Nebula macro key config", error);
 		}
 		return cachedNebulaMacroConfigKeyCode;
@@ -3720,5 +3717,21 @@ public class AutoauctionClient implements ClientModInitializer {
 			+ ", observed=" + observedState
 			+ ", desired=" + (desiredOn ? "ON" : "OFF")
 			+ ".";
+	}
+
+	static String nebulaGuiKeyLoadedMessage(int keyCode) {
+		return "Loaded Nebula GUI key code " + keyCode + ".";
+	}
+
+	static String nebulaCombatMacroKeyLoadedMessage(int keyCode) {
+		return "Loaded Nebula combat macro key code " + keyCode + ".";
+	}
+
+	static String nebulaGuiKeyLoadFailedMessage() {
+		return "Could not load Nebula GUI key.";
+	}
+
+	static String nebulaCombatMacroKeyLoadFailedMessage() {
+		return "Could not load Nebula combat macro key; falling back to autoauction.json.";
 	}
 }

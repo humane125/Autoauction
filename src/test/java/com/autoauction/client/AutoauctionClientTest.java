@@ -90,4 +90,15 @@ class AutoauctionClientTest {
 			AutoauctionClient.retoggleStatusMessage(0, NebulaMacroController.ObservedState.UNKNOWN, false)
 		);
 	}
+
+	@Test
+	void nebulaConfigDebugMessagesDoNotIncludeLocalPaths() {
+		assertEquals("Loaded Nebula GUI key code 344.", AutoauctionClient.nebulaGuiKeyLoadedMessage(344));
+		assertEquals("Loaded Nebula combat macro key code 80.", AutoauctionClient.nebulaCombatMacroKeyLoadedMessage(80));
+		assertEquals("Could not load Nebula GUI key.", AutoauctionClient.nebulaGuiKeyLoadFailedMessage());
+		assertEquals(
+			"Could not load Nebula combat macro key; falling back to autoauction.json.",
+			AutoauctionClient.nebulaCombatMacroKeyLoadFailedMessage()
+		);
+	}
 }
