@@ -103,6 +103,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_SELL_WARNING_GRACE_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
+	private static final int NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS = 1;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -1070,7 +1071,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void pollNebulaLatestLog() {
-		if (nebulaLatestLogWatcher == null || ++nebulaLatestLogPollTicks < 20) {
+		if (nebulaLatestLogWatcher == null || ++nebulaLatestLogPollTicks < NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS) {
 			return;
 		}
 		nebulaLatestLogPollTicks = 0;

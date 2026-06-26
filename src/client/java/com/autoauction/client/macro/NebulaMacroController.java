@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 public final class NebulaMacroController {
 	public static final String TOGGLE_COMMAND = "/n toggleMacro combat macro";
 	private static final long ENSURE_TIMEOUT_MS = 8_000L;
+	private static final long MANUAL_DISABLE_BURST_GUARD_MS = 1_500L;
 
 	private ObservedState observedState = ObservedState.UNKNOWN;
 	private Operation operation = Operation.NONE;
@@ -14,6 +15,7 @@ public final class NebulaMacroController {
 	private boolean desiredOn;
 	private boolean manualTogglePending;
 	private long manualToggleStartedAt;
+	private long lastManualDisableAt;
 
 	public ObservedState observedState() {
 		return observedState;
@@ -108,12 +110,20 @@ public final class NebulaMacroController {
 	}
 
 	public ManualToggleIntentResult recordManualToggleIntent(long nowMs) {
+		if (lastManualDisableAt > 0L && nowMs - lastManualDisableAt < MANUAL_DISABLE_BURST_GUARD_MS) {
+			desiredOn = false;
+			manualTogglePending = false;
+			manualToggleStartedAt = 0L;
+			clearOperation();
+			return ManualToggleIntentResult.DISABLING;
+		}
 		manualTogglePending = true;
 		manualToggleStartedAt = nowMs;
 		clearOperation();
 		return switch (observedState) {
 			case ON -> {
 				desiredOn = false;
+				lastManualDisableAt = nowMs;
 				yield ManualToggleIntentResult.DISABLING;
 			}
 			case OFF -> {
@@ -128,6 +138,7 @@ public final class NebulaMacroController {
 		desiredOn = false;
 		manualTogglePending = false;
 		manualToggleStartedAt = 0L;
+		lastManualDisableAt = System.currentTimeMillis();
 		clearOperation();
 	}
 
@@ -195,6 +206,7 @@ public final class NebulaMacroController {
 			manualToggleStartedAt = 0L;
 		} else if (observedState == ObservedState.OFF) {
 			desiredOn = false;
+			lastManualDisableAt = manualToggleStartedAt;
 			manualTogglePending = false;
 			manualToggleStartedAt = 0L;
 		}
