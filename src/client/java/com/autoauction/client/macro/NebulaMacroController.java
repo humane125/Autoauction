@@ -18,12 +18,13 @@ public final class NebulaMacroController {
 
 	public void onChatMessage(String message) {
 		String normalized = normalize(message);
-		if (!normalized.contains("nebulaclient") || !normalized.contains("combat macro:")) {
+		String compact = normalized.replace(" ", "");
+		if (!normalized.contains("nebulaclient") || !compact.contains("combatmacro:")) {
 			return;
 		}
-		if (normalized.contains("combat macro: enabled")) {
+		if (compact.contains("combatmacro:enabled")) {
 			observedState = ObservedState.ON;
-		} else if (normalized.contains("combat macro: disabled")) {
+		} else if (compact.contains("combatmacro:disabled")) {
 			observedState = ObservedState.OFF;
 		}
 	}

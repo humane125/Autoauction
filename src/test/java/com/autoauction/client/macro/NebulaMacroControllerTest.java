@@ -20,6 +20,17 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void detectsCompactCombatMacroMessages() {
+		NebulaMacroController controller = new NebulaMacroController();
+
+		controller.onChatMessage("NebulaClient > CombatMacro:Enabled");
+		assertEquals(NebulaMacroController.ObservedState.ON, controller.observedState());
+
+		controller.onChatMessage("NebulaClient > CombatMacro:Disabled");
+		assertEquals(NebulaMacroController.ObservedState.OFF, controller.observedState());
+	}
+
+	@Test
 	void ensureOnTogglesWhenOffAndCompletesAfterEnabledChat() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();

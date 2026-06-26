@@ -19,6 +19,7 @@ import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
+import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
@@ -116,8 +117,10 @@ public class AutoauctionClient implements ClientModInitializer {
 	private DiscordNotifier notifier;
 	private AltManagerHandoffClient handoffClient;
 	private NebulaMacroController macroController;
+	private NebulaLatestLogWatcher nebulaLatestLogWatcher;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
+	private int nebulaLatestLogPollTicks;
 	private boolean workflowStarted;
 	private boolean dumpSlotsKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
@@ -155,6 +158,9 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.notifier = new DiscordNotifier(config);
 			this.handoffClient = new AltManagerHandoffClient();
 			this.macroController = new NebulaMacroController();
+			this.nebulaLatestLogWatcher = new NebulaLatestLogWatcher(
+				FabricLoader.getInstance().getGameDir().resolve("logs").resolve("latest.log")
+			);
 			registerCommands();
 			registerMessageHandlers();
 			registerConnectionStatusHandlers();
@@ -166,6 +172,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
 				startModSocketIfNeeded(client);
 				reportConnectionStatus(client);
+				pollNebulaLatestLog();
 				handlePendingHandoff(client);
 				if (client.player == null || controller == null || actions == null) {
 					return;
@@ -882,8 +889,27 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private void pollNebulaLatestLog() {
+		if (nebulaLatestLogWatcher == null || ++nebulaLatestLogPollTicks < 20) {
+			return;
+		}
+		nebulaLatestLogPollTicks = 0;
+		try {
+			for (String message : nebulaLatestLogWatcher.pollMacroMessages()) {
+				handleMacroChatMessage(message);
+				sendRemoteClientLog("info", "nebula", NebulaLatestLogWatcher.displayMessage(message));
+			}
+		} catch (Exception error) {
+			Autoauction.LOGGER.debug("AutoAuction could not poll latest.log for Nebula macro messages", error);
+		}
+	}
+
 	private void sendRemoteClientLog(String level, String message) {
-		if (modSocketClient != null && !modSocketClient.sendClientLog(level, "system", message)) {
+		sendRemoteClientLog(level, "system", message);
+	}
+
+	private void sendRemoteClientLog(String level, String source, String message) {
+		if (modSocketClient != null && !modSocketClient.sendClientLog(level, source, message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
 		}
 	}
