@@ -11,9 +11,14 @@ public final class NebulaMacroController {
 	private Operation operation = Operation.NONE;
 	private long operationStartedAt;
 	private boolean toggleSent;
+	private boolean desiredOn;
 
 	public ObservedState observedState() {
 		return observedState;
+	}
+
+	public boolean desiredOn() {
+		return desiredOn;
 	}
 
 	public void onChatMessage(String message) {
@@ -30,6 +35,7 @@ public final class NebulaMacroController {
 	}
 
 	public EnsureResult ensureOn(Consumer<String> commandSink, long nowMs) {
+		desiredOn = true;
 		if (observedState == ObservedState.ON) {
 			clearOperation();
 			return EnsureResult.COMPLETE;
@@ -41,6 +47,7 @@ public final class NebulaMacroController {
 	}
 
 	public EnsureResult ensureOff(Consumer<String> commandSink, long nowMs) {
+		desiredOn = false;
 		if (observedState == ObservedState.OFF) {
 			clearOperation();
 			return EnsureResult.COMPLETE;
@@ -66,8 +73,37 @@ public final class NebulaMacroController {
 		return EnsureResult.PENDING;
 	}
 
+	public AutoRestoreResult autoRestoreIfDisabled(Consumer<String> commandSink, long nowMs) {
+		if (!desiredOn || observedState != ObservedState.OFF) {
+			return AutoRestoreResult.IDLE;
+		}
+		boolean sendingFirstToggle = operation != Operation.ENSURE_ON || !toggleSent;
+		EnsureResult result = ensureOn(commandSink, nowMs);
+		if (result == EnsureResult.COMPLETE) {
+			return AutoRestoreResult.COMPLETE;
+		}
+		if (result == EnsureResult.FAILED) {
+			return AutoRestoreResult.FAILED;
+		}
+		return sendingFirstToggle ? AutoRestoreResult.STARTED : AutoRestoreResult.PENDING;
+	}
+
+	public void recordManualToggleIntent() {
+		desiredOn = false;
+		clearOperation();
+	}
+
 	public void resetOperation() {
 		clearOperation();
+	}
+
+	public static boolean isToggleCommand(String command) {
+		String normalized = String.valueOf(command == null ? "" : command)
+			.trim()
+			.replaceFirst("^[/.]+", "")
+			.replaceAll("\\s+", " ")
+			.toLowerCase(Locale.ROOT);
+		return normalized.equals("n togglemacro combat macro");
 	}
 
 	private EnsureResult waitForState(Consumer<String> commandSink, long nowMs, ObservedState targetState) {
@@ -123,6 +159,14 @@ public final class NebulaMacroController {
 	public enum EnsureResult {
 		COMPLETE,
 		PENDING,
+		FAILED
+	}
+
+	public enum AutoRestoreResult {
+		IDLE,
+		STARTED,
+		PENDING,
+		COMPLETE,
 		FAILED
 	}
 

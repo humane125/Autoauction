@@ -47,9 +47,11 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientLoginConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.Screen;
@@ -121,6 +123,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
+	private boolean sendingAutoAuctionMacroToggleCommand;
+	private boolean nebulaMacroKeybindWasDown;
 	private boolean workflowStarted;
 	private boolean dumpSlotsKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
@@ -162,6 +166,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				FabricLoader.getInstance().getGameDir().resolve("logs").resolve("latest.log")
 			);
 			registerCommands();
+			registerOutgoingCommandHandlers();
 			registerMessageHandlers();
 			registerConnectionStatusHandlers();
 			ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
@@ -178,6 +183,8 @@ public class AutoauctionClient implements ClientModInitializer {
 					return;
 				}
 
+				observeNebulaMacroKeybind(client);
+				autoRestoreNebulaMacroIfNeeded(client);
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
 				if (realWorkflow != null) {
@@ -621,6 +628,15 @@ public class AutoauctionClient implements ClientModInitializer {
 		});
 	}
 
+	private void registerOutgoingCommandHandlers() {
+		ClientSendMessageEvents.COMMAND.register(command -> {
+			if (sendingAutoAuctionMacroToggleCommand || !NebulaMacroController.isToggleCommand(command)) {
+				return;
+			}
+			recordManualMacroToggleIntent("typed command");
+		});
+	}
+
 	private void handleTransferBuyOrderFilled(String message) {
 		PendingTransferFill pending = pendingTransferFill;
 		if (pending == null || !BazaarTransferWorkflow.isBuyOrderFilledMessage(message, pending.itemName())) {
@@ -889,6 +905,59 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private void observeNebulaMacroKeybind(Minecraft client) {
+		if (client.options == null || client.options.keyMappings == null) {
+			return;
+		}
+		boolean isDown = false;
+		for (KeyMapping keyMapping : client.options.keyMappings) {
+			if (isNebulaMacroKeyMapping(keyMapping) && keyMapping.isDown()) {
+				isDown = true;
+				break;
+			}
+		}
+		if (isDown && !nebulaMacroKeybindWasDown) {
+			recordManualMacroToggleIntent("Nebula keybind");
+		}
+		nebulaMacroKeybindWasDown = isDown;
+	}
+
+	private boolean isNebulaMacroKeyMapping(KeyMapping keyMapping) {
+		if (keyMapping == null) {
+			return false;
+		}
+		String name = String.valueOf(keyMapping.getName()).toLowerCase(Locale.ROOT);
+		String category = String.valueOf(keyMapping.getCategory()).toLowerCase(Locale.ROOT);
+		String value = name + " " + category;
+		boolean nebula = value.contains("nebula");
+		boolean combatMacro = value.contains("combat") && value.contains("macro");
+		return nebula && (combatMacro || value.contains("togglemacro"));
+	}
+
+	private void recordManualMacroToggleIntent(String source) {
+		if (macroController == null) {
+			return;
+		}
+		macroController.recordManualToggleIntent();
+		sendRemoteClientLog("info", "nebula", "Manual Nebula combat macro toggle detected from " + source + "; auto-retoggle paused.");
+	}
+
+	private void autoRestoreNebulaMacroIfNeeded(Minecraft client) {
+		if (macroController == null) {
+			return;
+		}
+		NebulaMacroController.AutoRestoreResult result = macroController.autoRestoreIfDisabled(
+			command -> runMacroToggleCommand(client, command),
+			System.currentTimeMillis()
+		);
+		switch (result) {
+			case STARTED -> sendRemoteClientLog("warn", "nebula", "Nebula combat macro disabled while desired on; retoggling.");
+			case FAILED -> sendRemoteClientLog("error", "nebula", "Nebula combat macro auto-retoggle timed out; will retry.");
+			default -> {
+			}
+		}
+	}
+
 	private void pollNebulaLatestLog() {
 		if (nebulaLatestLogWatcher == null || ++nebulaLatestLogPollTicks < 20) {
 			return;
@@ -916,7 +985,12 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void runMacroToggleCommand(Minecraft client, String command) {
 		if (actions != null) {
-			actions.sendClientCommand(client, command);
+			sendingAutoAuctionMacroToggleCommand = true;
+			try {
+				actions.sendClientCommand(client, command);
+			} finally {
+				sendingAutoAuctionMacroToggleCommand = false;
+			}
 		}
 	}
 

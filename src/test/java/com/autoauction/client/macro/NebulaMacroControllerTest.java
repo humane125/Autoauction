@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NebulaMacroControllerTest {
 	@Test
@@ -81,5 +83,60 @@ class NebulaMacroControllerTest {
 		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.ensureOn(commands::add, 1_000L));
 		assertEquals(NebulaMacroController.EnsureResult.FAILED, controller.ensureOn(commands::add, 9_001L));
 		assertEquals(1, commands.size());
+	}
+
+	@Test
+	void autoRestoresWhenDesiredOnAndDisabledIsObserved() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+		assertTrue(controller.desiredOn());
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+
+		assertEquals(NebulaMacroController.AutoRestoreResult.PENDING, controller.autoRestoreIfDisabled(commands::add, 2_100L));
+		assertEquals(1, commands.size());
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_200L));
+		assertEquals(1, commands.size());
+	}
+
+	@Test
+	void manualToggleIntentSuppressesAutoRestore() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+		controller.recordManualToggleIntent();
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(), commands);
+		assertFalse(controller.desiredOn());
+	}
+
+	@Test
+	void ensureOffClearsDesiredOn() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.ensureOff(commands::add, 2_000L));
+
+		assertFalse(controller.desiredOn());
+	}
+
+	@Test
+	void recognizesNebulaToggleCommand() {
+		assertTrue(NebulaMacroController.isToggleCommand("/n toggleMacro combat macro"));
+		assertTrue(NebulaMacroController.isToggleCommand("n   togglemacro   combat   macro"));
+		assertFalse(NebulaMacroController.isToggleCommand("/n other"));
 	}
 }
