@@ -35,11 +35,11 @@ class AutoAuctionConfigStoreTest {
 	}
 
 	@Test
-	void rejectsRealListingWithoutMacroStopCommand() {
+	void realListingDoesNotRequireConfiguredMacroStopCommand() {
 		AutoAuctionConfig config = AutoAuctionConfig.defaults()
 			.withMacroStopCommand("");
 
-		assertFalse(config.canRunRealListing());
+		assertTrue(config.canRunRealListing());
 	}
 
 	@Test

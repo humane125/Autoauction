@@ -42,7 +42,7 @@ public record AutoAuctionConfig(
 	}
 
 	public boolean canRunRealListing() {
-		return !macroStopCommand.isBlank();
+		return true;
 	}
 
 	public AutoAuctionConfig withMacroStopCommand(String value) {

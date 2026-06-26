@@ -19,6 +19,7 @@ import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
+import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
@@ -114,6 +115,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final TransferAccountListRequests transferAccountListRequests = new TransferAccountListRequests();
 	private DiscordNotifier notifier;
 	private AltManagerHandoffClient handoffClient;
+	private NebulaMacroController macroController;
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private boolean workflowStarted;
@@ -152,6 +154,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			);
 			this.notifier = new DiscordNotifier(config);
 			this.handoffClient = new AltManagerHandoffClient();
+			this.macroController = new NebulaMacroController();
 			registerCommands();
 			registerMessageHandlers();
 			registerConnectionStatusHandlers();
@@ -493,11 +496,18 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 
-		if (!config.macroStartCommand().isBlank()) {
-			Autoauction.LOGGER.info("AutoAuction handoff starting macro with command: {}", config.macroStartCommand());
-			actions.sendClientCommand(client, config.macroStartCommand());
-		} else {
-			Autoauction.LOGGER.info("AutoAuction handoff complete; macroStartCommand is not configured.");
+		NebulaMacroController.EnsureResult macroStart = macroController.ensureOn(
+			command -> runMacroToggleCommand(client, command),
+			System.currentTimeMillis()
+		);
+		if (macroStart == NebulaMacroController.EnsureResult.PENDING) {
+			return;
+		}
+		if (macroStart == NebulaMacroController.EnsureResult.FAILED) {
+			notifyIssueAsync("macro enable confirmation timed out during account handoff");
+			Autoauction.LOGGER.warn("AutoAuction handoff failed waiting for Nebula combat macro to enable.");
+			pendingHandoff = null;
+			return;
 		}
 		controller.start();
 		workflowStarted = false;
@@ -585,11 +595,13 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void registerMessageHandlers() {
-		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) ->
-			sendRemoteChatLog(message)
-		);
+		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) -> {
+			handleMacroChatMessage(message.getString());
+			sendRemoteChatLog(message);
+		});
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			String text = message.getString();
+			handleMacroChatMessage(text);
 			if (!overlay) {
 				sendRemoteChatLog(message);
 			}
@@ -864,9 +876,21 @@ public class AutoauctionClient implements ClientModInitializer {
 		});
 	}
 
+	private void handleMacroChatMessage(String text) {
+		if (macroController != null) {
+			macroController.onChatMessage(text);
+		}
+	}
+
 	private void sendRemoteClientLog(String level, String message) {
 		if (modSocketClient != null && !modSocketClient.sendClientLog(level, "system", message)) {
 			Autoauction.LOGGER.debug("AutoAuction remote client log skipped: {}", message);
+		}
+	}
+
+	private void runMacroToggleCommand(Minecraft client, String command) {
+		if (actions != null) {
+			actions.sendClientCommand(client, command);
 		}
 	}
 
@@ -3011,8 +3035,18 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case STOP_MACRO -> {
-					debug(client, "Stopping macro with command: " + config.macroStopCommand());
-					actions.sendClientCommand(client, config.macroStopCommand());
+					NebulaMacroController.EnsureResult result = macroController.ensureOff(
+						command -> runMacroToggleCommand(client, command),
+						System.currentTimeMillis()
+					);
+					if (result == NebulaMacroController.EnsureResult.PENDING) {
+						return;
+					}
+					if (result == NebulaMacroController.EnsureResult.FAILED) {
+						fail(client, "macro disable confirmation timed out");
+						return;
+					}
+					debug(client, "Nebula combat macro confirmed disabled.");
 					transition(RealAuctionState.RETURN_TO_ISLAND_BEFORE_ARMOR, client);
 				}
 				case RETURN_TO_ISLAND_BEFORE_ARMOR -> {
