@@ -2,6 +2,7 @@ package com.autoauction.client;
 
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
+import com.autoauction.client.macro.NebulaMacroController;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
@@ -76,5 +77,17 @@ class AutoauctionClientTest {
 	@Test
 	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
 		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
+	}
+
+	@Test
+	void retoggleStatusShowsCountObservedAndDesiredState() {
+		assertEquals(
+			"AutoAuction retoggle status: count=3, observed=OFF, desired=ON.",
+			AutoauctionClient.retoggleStatusMessage(3, NebulaMacroController.ObservedState.OFF, true)
+		);
+		assertEquals(
+			"AutoAuction retoggle status: count=0, observed=UNKNOWN, desired=OFF.",
+			AutoauctionClient.retoggleStatusMessage(0, NebulaMacroController.ObservedState.UNKNOWN, false)
+		);
 	}
 }

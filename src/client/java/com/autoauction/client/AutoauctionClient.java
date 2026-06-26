@@ -147,6 +147,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private TransferLoopGoal transferLoopGoal;
 	private NebulaMacroController.ObservedState lastNebulaDebugObservedState = NebulaMacroController.ObservedState.UNKNOWN;
 	private boolean lastNebulaDebugDesiredOn;
+	private int autoRetoggleCount;
 	private String senderParkedItemName;
 	private int senderParkedStacks;
 	private PendingHandoff pendingHandoff;
@@ -1009,7 +1010,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			System.currentTimeMillis()
 		);
 		switch (result) {
-			case STARTED -> sendRemoteDebugLog("warn", "nebula", "Nebula combat macro disabled while desired on; retoggling.");
+			case STARTED -> {
+				autoRetoggleCount++;
+				sendRemoteDebugLog("warn", "nebula", "Nebula combat macro disabled while desired on; retoggling.");
+			}
 			case FAILED -> sendRemoteDebugLog("error", "nebula", "Nebula combat macro auto-retoggle timed out; will retry.");
 			default -> {
 			}
@@ -1189,6 +1193,11 @@ public class AutoauctionClient implements ClientModInitializer {
 				.then(literal("status").executes(context -> {
 					sendFeedback(context.getSource(), debugStatusMessage());
 					return 1;
+				})))
+			.then(literal("retoggle")
+				.then(literal("status").executes(context -> {
+					sendFeedback(context.getSource(), retoggleStatusMessage());
+					return 1;
 				})));
 	}
 
@@ -1245,6 +1254,14 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private String debugStatusMessage() {
 		return "AutoAuction debug is " + (isDebugEnabled() ? "ON" : "OFF") + ".";
+	}
+
+	private String retoggleStatusMessage() {
+		NebulaMacroController.ObservedState observedState = macroController == null
+			? NebulaMacroController.ObservedState.UNKNOWN
+			: macroController.observedState();
+		boolean desiredOn = macroController != null && macroController.desiredOn();
+		return retoggleStatusMessage(autoRetoggleCount, observedState, desiredOn);
 	}
 
 	private boolean isDebugEnabled() {
@@ -3644,5 +3661,12 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	static int bazaarCloseDelayMs() {
 		return BAZAAR_CLOSE_DELAY_MS;
+	}
+
+	static String retoggleStatusMessage(int count, NebulaMacroController.ObservedState observedState, boolean desiredOn) {
+		return "AutoAuction retoggle status: count=" + count
+			+ ", observed=" + observedState
+			+ ", desired=" + (desiredOn ? "ON" : "OFF")
+			+ ".";
 	}
 }
