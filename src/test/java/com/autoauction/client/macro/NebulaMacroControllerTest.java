@@ -144,32 +144,41 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
-	void fastSecondKeyPressAfterManualDisableDoesNotReenableAutoRestore() {
+	void manualToggleImmediatelyFlipsPredictedState() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_500L));
+		assertEquals(NebulaMacroController.ObservedState.OFF, controller.observedState());
+		assertFalse(controller.desiredOn());
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 1_600L));
+		assertEquals(List.of(), commands);
+	}
+
+	@Test
+	void predictedManualEnableSuppressesStaleDisabledConfirmationUntilEnabledArrives() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();
 
 		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
 		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
 		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_500L));
-		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
-		assertFalse(controller.desiredOn());
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.ENABLING, controller.recordManualToggleIntent(1_700L));
+		assertEquals(NebulaMacroController.ObservedState.ON, controller.observedState());
+		assertTrue(controller.desiredOn());
 
-		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_700L));
-		assertFalse(controller.desiredOn());
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
 		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 1_800L));
 		assertEquals(List.of(), commands);
-	}
-
-	@Test
-	void manualEnableWorksAfterManualDisableDebounceExpires() {
-		NebulaMacroController controller = new NebulaMacroController();
 
 		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
-		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_000L));
-		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
-
-		assertEquals(NebulaMacroController.ManualToggleIntentResult.ENABLING, controller.recordManualToggleIntent(3_100L));
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 1_900L));
+		assertEquals(NebulaMacroController.ObservedState.ON, controller.observedState());
 		assertTrue(controller.desiredOn());
+		assertEquals(List.of(), commands);
 	}
 
 	@Test
