@@ -1,6 +1,7 @@
 package com.autoauction.client.macro;
 
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class NebulaMacroController {
@@ -25,19 +26,11 @@ public final class NebulaMacroController {
 	}
 
 	public void onChatMessage(String message) {
-		String normalized = normalize(message);
-		String compact = normalized.replace(" ", "");
-		if (compact.contains("autoauctiondebug/nebula")) {
+		Optional<ObservedState> parsedState = parseObservedState(message);
+		if (parsedState.isEmpty()) {
 			return;
 		}
-		if (!normalized.contains("nebulaclient") || !compact.contains("combatmacro:")) {
-			return;
-		}
-		if (compact.contains("combatmacro:enabled")) {
-			observedState = ObservedState.ON;
-		} else if (compact.contains("combatmacro:disabled")) {
-			observedState = ObservedState.OFF;
-		}
+		observedState = parsedState.get();
 		applyPendingManualToggleResult();
 	}
 
@@ -130,6 +123,24 @@ public final class NebulaMacroController {
 		};
 	}
 
+	public ManualToggleIntentResult recordManualToggleResult(ObservedState resultingState, long nowMs) {
+		clearOperation();
+		clearManualTogglePending();
+		return switch (resultingState) {
+			case ON -> {
+				observedState = ObservedState.ON;
+				desiredOn = true;
+				yield ManualToggleIntentResult.ENABLING;
+			}
+			case OFF -> {
+				observedState = ObservedState.OFF;
+				desiredOn = false;
+				yield ManualToggleIntentResult.DISABLING;
+			}
+			case UNKNOWN -> recordManualToggleIntent(nowMs);
+		};
+	}
+
 	public void recordManualDisableIntent() {
 		desiredOn = false;
 		observedState = ObservedState.OFF;
@@ -148,6 +159,24 @@ public final class NebulaMacroController {
 			.replaceAll("\\s+", " ")
 			.toLowerCase(Locale.ROOT);
 		return normalized.equals("n togglemacro combat macro");
+	}
+
+	public static Optional<ObservedState> parseObservedState(String message) {
+		String normalized = normalize(message);
+		String compact = normalized.replace(" ", "");
+		if (compact.contains("autoauctiondebug/nebula")) {
+			return Optional.empty();
+		}
+		if (!normalized.contains("nebulaclient") || !compact.contains("combatmacro:")) {
+			return Optional.empty();
+		}
+		if (compact.contains("combatmacro:enabled")) {
+			return Optional.of(ObservedState.ON);
+		}
+		if (compact.contains("combatmacro:disabled")) {
+			return Optional.of(ObservedState.OFF);
+		}
+		return Optional.empty();
 	}
 
 	private EnsureResult waitForState(Consumer<String> commandSink, long nowMs, ObservedState targetState) {

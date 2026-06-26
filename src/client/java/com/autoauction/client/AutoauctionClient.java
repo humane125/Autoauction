@@ -104,6 +104,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
 	private static final int NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS = 1;
+	private static final long NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS = 250L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -153,6 +154,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private TransferLoopGoal transferLoopGoal;
 	private NebulaMacroController.ObservedState lastNebulaDebugObservedState = NebulaMacroController.ObservedState.UNKNOWN;
 	private boolean lastNebulaDebugDesiredOn;
+	private NebulaMacroController.ObservedState lastNebulaMacroStatusResult = NebulaMacroController.ObservedState.UNKNOWN;
+	private long lastNebulaMacroStatusResultAt;
 	private int autoRetoggleCount;
 	private String senderParkedItemName;
 	private int senderParkedStacks;
@@ -920,12 +923,17 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void handleMacroChatMessage(String text) {
 		if (macroController != null) {
+			Optional<NebulaMacroController.ObservedState> parsedState = NebulaMacroController.parseObservedState(text);
 			NebulaMacroController.ObservedState beforeState = macroController.observedState();
 			boolean beforeDesiredOn = macroController.desiredOn();
 			if (nebulaGuiInputTracker.maybeOpen()) {
 				macroController.onGuiChatMessage(text);
 			} else {
 				macroController.onChatMessage(text);
+			}
+			if (parsedState.isPresent()) {
+				lastNebulaMacroStatusResult = parsedState.get();
+				lastNebulaMacroStatusResultAt = System.currentTimeMillis();
 			}
 			reportNebulaMacroIntentIfChanged(beforeState, beforeDesiredOn);
 		}
@@ -1042,13 +1050,22 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (macroController == null) {
 			return;
 		}
-		NebulaMacroController.ManualToggleIntentResult result = macroController.recordManualToggleIntent(System.currentTimeMillis());
+		long now = System.currentTimeMillis();
+		NebulaMacroController.ManualToggleIntentResult result = recentNebulaStatusResultAvailable(now)
+			? macroController.recordManualToggleResult(lastNebulaMacroStatusResult, now)
+			: macroController.recordManualToggleIntent(now);
 		String message = switch (result) {
 			case ENABLING -> "Manual Nebula combat macro enable detected from " + source + "; auto-retoggle remains active.";
 			case DISABLING -> "Manual Nebula combat macro disable detected from " + source + "; auto-retoggle paused.";
 			case UNKNOWN -> "Manual Nebula combat macro toggle detected from " + source + "; waiting for Nebula status.";
 		};
 		sendRemoteDebugLog("info", "nebula", message);
+	}
+
+	private boolean recentNebulaStatusResultAvailable(long now) {
+		return lastNebulaMacroStatusResult != NebulaMacroController.ObservedState.UNKNOWN
+			&& lastNebulaMacroStatusResultAt > 0L
+			&& now - lastNebulaMacroStatusResultAt <= NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS;
 	}
 
 	private void autoRestoreNebulaMacroIfNeeded(Minecraft client) {
