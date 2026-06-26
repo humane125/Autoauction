@@ -117,6 +117,13 @@ public final class NebulaMacroController {
 		};
 	}
 
+	public void recordManualDisableIntent() {
+		desiredOn = false;
+		manualTogglePending = false;
+		manualToggleStartedAt = 0L;
+		clearOperation();
+	}
+
 	public void resetOperation() {
 		clearOperation();
 	}

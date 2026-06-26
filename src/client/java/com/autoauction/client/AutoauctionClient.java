@@ -946,7 +946,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		boolean guiKeyDown = keyCode.isPresent()
 			&& GLFW.glfwGetKey(client.getWindow().handle(), keyCode.getAsInt()) == GLFW.GLFW_PRESS;
 		boolean escapeDown = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_ESCAPE) == GLFW.GLFW_PRESS;
-		nebulaGuiInputTracker.tick(client.screen != null, guiKeyDown, escapeDown);
+		if (nebulaGuiInputTracker.tick(client.screen != null, guiKeyDown, escapeDown) && macroController != null) {
+			macroController.recordManualDisableIntent();
+			sendRemoteDebugLog("info", "nebula", "Nebula GUI opened; treating macro disable as manual intent and pausing auto-retoggle.");
+		}
 	}
 
 	private OptionalInt resolveCachedNebulaGuiKey(Minecraft client) {

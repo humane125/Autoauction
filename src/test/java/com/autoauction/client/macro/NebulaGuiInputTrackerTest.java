@@ -10,13 +10,13 @@ class NebulaGuiInputTrackerTest {
 	void tracksCustomGuiOpenUntilEscapeIsPressed() {
 		NebulaGuiInputTracker tracker = new NebulaGuiInputTracker();
 
-		tracker.tick(false, true, false);
+		assertTrue(tracker.tick(false, true, false));
 		assertTrue(tracker.blocksMacroIntent(false));
 
-		tracker.tick(false, false, false);
+		assertFalse(tracker.tick(false, false, false));
 		assertTrue(tracker.blocksMacroIntent(false));
 
-		tracker.tick(false, false, true);
+		assertFalse(tracker.tick(false, false, true));
 		assertFalse(tracker.blocksMacroIntent(false));
 	}
 
@@ -24,8 +24,8 @@ class NebulaGuiInputTrackerTest {
 	void ignoresRepeatedGuiKeyWhileHeld() {
 		NebulaGuiInputTracker tracker = new NebulaGuiInputTracker();
 
-		tracker.tick(false, true, false);
-		tracker.tick(false, true, true);
+		assertTrue(tracker.tick(false, true, false));
+		assertFalse(tracker.tick(false, true, true));
 
 		assertFalse(tracker.blocksMacroIntent(false));
 	}
