@@ -63,6 +63,9 @@ public final class NebulaLatestLogWatcher {
 
 	public static boolean isNebulaMacroLine(String line) {
 		String normalized = normalize(line);
+		if (normalized.contains("autoauctiondebug/nebula")) {
+			return false;
+		}
 		return normalized.contains("nebulaclient")
 			&& (normalized.contains("combatmacro:") || normalized.contains("combat macro:"))
 			&& (normalized.contains("enabled") || normalized.contains("disabled"));

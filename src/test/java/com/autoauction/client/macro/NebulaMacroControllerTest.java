@@ -33,6 +33,15 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void ignoresAutoAuctionDebugEchoesOfNebulaMacroMessages() {
+		NebulaMacroController controller = new NebulaMacroController();
+
+		controller.onChatMessage("[AutoAuction debug/nebula] NebulaClient > Combat Macro: Enabled");
+
+		assertEquals(NebulaMacroController.ObservedState.UNKNOWN, controller.observedState());
+	}
+
+	@Test
 	void ensureOnTogglesWhenOffAndCompletesAfterEnabledChat() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();

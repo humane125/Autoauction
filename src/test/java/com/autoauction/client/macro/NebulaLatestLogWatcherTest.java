@@ -32,6 +32,11 @@ class NebulaLatestLogWatcherTest {
 	}
 
 	@Test
+	void ignoresAutoAuctionDebugEchoesOfNebulaMacroMessages() {
+		assertFalse(NebulaLatestLogWatcher.isNebulaMacroLine("[Render thread/INFO]: [System] [CHAT] [AutoAuction debug/nebula] NebulaClient > Combat Macro: Enabled"));
+	}
+
+	@Test
 	void pollsOnlyNewMatchingLogLines() throws Exception {
 		Path logFile = tempDir.resolve("latest.log");
 		Files.writeString(logFile, "[INFO]: boot\n", StandardCharsets.UTF_8);

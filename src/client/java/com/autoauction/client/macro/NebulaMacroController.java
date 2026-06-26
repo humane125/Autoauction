@@ -26,6 +26,9 @@ public final class NebulaMacroController {
 	public void onChatMessage(String message) {
 		String normalized = normalize(message);
 		String compact = normalized.replace(" ", "");
+		if (compact.contains("autoauctiondebug/nebula")) {
+			return;
+		}
 		if (!normalized.contains("nebulaclient") || !compact.contains("combatmacro:")) {
 			return;
 		}
