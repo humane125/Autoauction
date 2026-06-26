@@ -1003,6 +1003,11 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void sendRemoteDebugLog(String level, String source, String message) {
 		if (isDebugEnabled()) {
+			Autoauction.LOGGER.info("[AutoAuction debug/{}] {}", source, message);
+			Minecraft client = Minecraft.getInstance();
+			if (client.player != null) {
+				client.player.sendSystemMessage(Component.literal("[AutoAuction debug/" + source + "] " + message));
+			}
 			sendRemoteClientLog(level, source, message);
 		}
 	}
