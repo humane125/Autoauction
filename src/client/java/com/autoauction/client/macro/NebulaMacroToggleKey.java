@@ -1,9 +1,15 @@
 package com.autoauction.client.macro;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.OptionalInt;
 
@@ -33,6 +39,35 @@ public final class NebulaMacroToggleKey {
 		} catch (ReflectiveOperationException ignored) {
 		}
 		return OptionalInt.empty();
+	}
+
+	public static OptionalInt resolveFromGameDirectory(Path gameDirectory) throws IOException {
+		Path configPath = configPath(gameDirectory);
+		if (!Files.exists(configPath)) {
+			return OptionalInt.empty();
+		}
+		JsonObject root = JsonParser.parseString(Files.readString(configPath, StandardCharsets.UTF_8)).getAsJsonObject();
+		if (!root.has("Combat Macro") || !root.get("Combat Macro").isJsonObject()) {
+			return OptionalInt.empty();
+		}
+		JsonObject combatMacro = root.getAsJsonObject("Combat Macro");
+		if (!combatMacro.has("Toggle Combat Macro") || !combatMacro.get("Toggle Combat Macro").isJsonObject()) {
+			return OptionalInt.empty();
+		}
+		JsonObject toggle = combatMacro.getAsJsonObject("Toggle Combat Macro");
+		if (!toggle.has("type") || !toggle.get("type").isJsonPrimitive()
+			|| !"KEYSYM".equalsIgnoreCase(toggle.get("type").getAsString())) {
+			return OptionalInt.empty();
+		}
+		if (!toggle.has("code") || !toggle.get("code").isJsonPrimitive()
+			|| !toggle.get("code").getAsJsonPrimitive().isNumber()) {
+			return OptionalInt.empty();
+		}
+		return OptionalInt.of(toggle.get("code").getAsInt());
+	}
+
+	public static Path configPath(Path gameDirectory) {
+		return gameDirectory.resolve("Nebula").resolve("Combat Module").resolve("config.json");
 	}
 
 	private static String normalize(String configuredKey) {

@@ -127,6 +127,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	private int nebulaLatestLogPollTicks;
 	private boolean sendingAutoAuctionMacroToggleCommand;
 	private boolean nebulaMacroKeybindWasDown;
+	private Path cachedNebulaMacroConfigPath;
+	private long cachedNebulaMacroConfigModifiedAt = Long.MIN_VALUE;
+	private OptionalInt cachedNebulaMacroConfigKeyCode = OptionalInt.empty();
 	private boolean workflowStarted;
 	private boolean dumpSlotsKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
@@ -935,16 +938,53 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (config == null) {
 			return;
 		}
-		OptionalInt keyCode = NebulaMacroToggleKey.resolve(config.nebulaMacroToggleKey());
-		if (keyCode.isEmpty()) {
+		ResolvedMacroKey resolvedKey = resolveNebulaMacroToggleKey(client);
+		if (resolvedKey.keyCode().isEmpty()) {
 			nebulaMacroKeybindWasDown = false;
 			return;
 		}
-		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), keyCode.getAsInt()) == GLFW.GLFW_PRESS;
+		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), resolvedKey.keyCode().getAsInt()) == GLFW.GLFW_PRESS;
 		if (isDown && !nebulaMacroKeybindWasDown) {
-			recordManualMacroToggleIntent("configured Nebula key " + config.nebulaMacroToggleKey());
+			recordManualMacroToggleIntent(resolvedKey.source());
 		}
 		nebulaMacroKeybindWasDown = isDown;
+	}
+
+	private ResolvedMacroKey resolveNebulaMacroToggleKey(Minecraft client) {
+		OptionalInt nebulaConfigKey = resolveCachedNebulaMacroConfigKey(client);
+		if (nebulaConfigKey.isPresent()) {
+			return new ResolvedMacroKey(nebulaConfigKey, "Nebula config key code " + nebulaConfigKey.getAsInt());
+		}
+		OptionalInt configuredKey = NebulaMacroToggleKey.resolve(config.nebulaMacroToggleKey());
+		return new ResolvedMacroKey(configuredKey, "configured Nebula key " + config.nebulaMacroToggleKey());
+	}
+
+	private OptionalInt resolveCachedNebulaMacroConfigKey(Minecraft client) {
+		Path configPath = NebulaMacroToggleKey.configPath(client.gameDirectory.toPath());
+		long modifiedAt = Long.MIN_VALUE;
+		try {
+			if (Files.exists(configPath)) {
+				modifiedAt = Files.getLastModifiedTime(configPath).toMillis();
+			}
+			if (configPath.equals(cachedNebulaMacroConfigPath) && modifiedAt == cachedNebulaMacroConfigModifiedAt) {
+				return cachedNebulaMacroConfigKeyCode;
+			}
+			cachedNebulaMacroConfigPath = configPath;
+			cachedNebulaMacroConfigModifiedAt = modifiedAt;
+			cachedNebulaMacroConfigKeyCode = NebulaMacroToggleKey.resolveFromGameDirectory(client.gameDirectory.toPath());
+			if (cachedNebulaMacroConfigKeyCode.isPresent()) {
+				sendRemoteDebugLog("info", "nebula",
+					"Loaded Nebula combat macro key code " + cachedNebulaMacroConfigKeyCode.getAsInt() + " from " + configPath);
+			}
+		} catch (Exception error) {
+			cachedNebulaMacroConfigPath = configPath;
+			cachedNebulaMacroConfigModifiedAt = modifiedAt;
+			cachedNebulaMacroConfigKeyCode = OptionalInt.empty();
+			sendRemoteDebugLog("warn", "nebula",
+				"Could not load Nebula combat macro key from " + configPath + "; falling back to autoauction.json.");
+			Autoauction.LOGGER.debug("AutoAuction could not load Nebula macro key config", error);
+		}
+		return cachedNebulaMacroConfigKeyCode;
 	}
 
 	private void recordManualMacroToggleIntent(String source) {
@@ -3581,6 +3621,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				Autoauction.LOGGER.error("AutoAuction Discord ban notification failed", e);
 			}
 		});
+	}
+
+	private record ResolvedMacroKey(OptionalInt keyCode, String source) {
 	}
 
 	static int effectiveClickDelayMs(int configuredDelayMs) {
