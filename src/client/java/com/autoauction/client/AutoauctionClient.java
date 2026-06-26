@@ -941,8 +941,13 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (macroController == null) {
 			return;
 		}
-		macroController.recordManualToggleIntent();
-		sendRemoteClientLog("info", "nebula", "Manual Nebula combat macro toggle detected from " + source + "; auto-retoggle paused.");
+		NebulaMacroController.ManualToggleIntentResult result = macroController.recordManualToggleIntent(System.currentTimeMillis());
+		String message = switch (result) {
+			case ENABLING -> "Manual Nebula combat macro enable detected from " + source + "; auto-retoggle remains active.";
+			case DISABLING -> "Manual Nebula combat macro disable detected from " + source + "; auto-retoggle paused.";
+			case UNKNOWN -> "Manual Nebula combat macro toggle detected from " + source + "; waiting for Nebula status.";
+		};
+		sendRemoteClientLog("info", "nebula", message);
 	}
 
 	private void autoRestoreNebulaMacroIfNeeded(Minecraft client) {

@@ -12,6 +12,8 @@ public final class NebulaMacroController {
 	private long operationStartedAt;
 	private boolean toggleSent;
 	private boolean desiredOn;
+	private boolean manualTogglePending;
+	private long manualToggleStartedAt;
 
 	public ObservedState observedState() {
 		return observedState;
@@ -32,6 +34,7 @@ public final class NebulaMacroController {
 		} else if (compact.contains("combatmacro:disabled")) {
 			observedState = ObservedState.OFF;
 		}
+		applyPendingManualToggleResult();
 	}
 
 	public EnsureResult ensureOn(Consumer<String> commandSink, long nowMs) {
@@ -74,6 +77,12 @@ public final class NebulaMacroController {
 	}
 
 	public AutoRestoreResult autoRestoreIfDisabled(Consumer<String> commandSink, long nowMs) {
+		if (manualTogglePending) {
+			if (!timedOut(nowMs, manualToggleStartedAt)) {
+				return AutoRestoreResult.IDLE;
+			}
+			manualTogglePending = false;
+		}
 		if (!desiredOn || observedState != ObservedState.OFF) {
 			return AutoRestoreResult.IDLE;
 		}
@@ -88,9 +97,21 @@ public final class NebulaMacroController {
 		return sendingFirstToggle ? AutoRestoreResult.STARTED : AutoRestoreResult.PENDING;
 	}
 
-	public void recordManualToggleIntent() {
-		desiredOn = false;
+	public ManualToggleIntentResult recordManualToggleIntent(long nowMs) {
+		manualTogglePending = true;
+		manualToggleStartedAt = nowMs;
 		clearOperation();
+		return switch (observedState) {
+			case ON -> {
+				desiredOn = false;
+				yield ManualToggleIntentResult.DISABLING;
+			}
+			case OFF -> {
+				desiredOn = true;
+				yield ManualToggleIntentResult.ENABLING;
+			}
+			case UNKNOWN -> ManualToggleIntentResult.UNKNOWN;
+		};
 	}
 
 	public void resetOperation() {
@@ -134,13 +155,32 @@ public final class NebulaMacroController {
 	}
 
 	private boolean timedOut(long nowMs) {
-		return nowMs - operationStartedAt >= ENSURE_TIMEOUT_MS;
+		return timedOut(nowMs, operationStartedAt);
+	}
+
+	private boolean timedOut(long nowMs, long startedAt) {
+		return nowMs - startedAt >= ENSURE_TIMEOUT_MS;
 	}
 
 	private void clearOperation() {
 		operation = Operation.NONE;
 		operationStartedAt = 0L;
 		toggleSent = false;
+	}
+
+	private void applyPendingManualToggleResult() {
+		if (!manualTogglePending) {
+			return;
+		}
+		if (observedState == ObservedState.ON) {
+			desiredOn = true;
+			manualTogglePending = false;
+			manualToggleStartedAt = 0L;
+		} else if (observedState == ObservedState.OFF) {
+			desiredOn = false;
+			manualTogglePending = false;
+			manualToggleStartedAt = 0L;
+		}
 	}
 
 	private static String normalize(String message) {
@@ -168,6 +208,12 @@ public final class NebulaMacroController {
 		PENDING,
 		COMPLETE,
 		FAILED
+	}
+
+	public enum ManualToggleIntentResult {
+		ENABLING,
+		DISABLING,
+		UNKNOWN
 	}
 
 	private enum Operation {

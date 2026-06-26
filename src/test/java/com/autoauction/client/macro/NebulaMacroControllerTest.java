@@ -113,12 +113,45 @@ class NebulaMacroControllerTest {
 
 		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
 		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
-		controller.recordManualToggleIntent();
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_500L));
 		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
 
 		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_000L));
 		assertEquals(List.of(), commands);
 		assertFalse(controller.desiredOn());
+	}
+
+	@Test
+	void manualToggleOnKeepsAutoRestoreEnabled() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.ENABLING, controller.recordManualToggleIntent(1_000L));
+
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 1_100L));
+		assertEquals(List.of(), commands);
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertTrue(controller.desiredOn());
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+	}
+
+	@Test
+	void unknownManualToggleWaitsForObservedResult() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.UNKNOWN, controller.recordManualToggleIntent(1_000L));
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+
+		assertTrue(controller.desiredOn());
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
 	}
 
 	@Test
