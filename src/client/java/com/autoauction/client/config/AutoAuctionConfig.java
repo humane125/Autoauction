@@ -7,6 +7,7 @@ public record AutoAuctionConfig(
 	String discordMentionUserId,
 	String macroStopCommand,
 	String macroStartCommand,
+	String nebulaMacroToggleKey,
 	String returnToHubCommand,
 	boolean enabledByDefault,
 	int killThreshold,
@@ -21,6 +22,7 @@ public record AutoAuctionConfig(
 		discordMentionUserId = valueOrEmpty(discordMentionUserId);
 		macroStopCommand = valueOrEmpty(macroStopCommand);
 		macroStartCommand = valueOrEmpty(macroStartCommand);
+		nebulaMacroToggleKey = valueOrDefault(nebulaMacroToggleKey, "P");
 		returnToHubCommand = valueOrEmpty(returnToHubCommand);
 	}
 
@@ -32,6 +34,7 @@ public record AutoAuctionConfig(
 			"",
 			"",
 			"",
+			"P",
 			"/hub",
 			true,
 			25_000,
@@ -46,16 +49,21 @@ public record AutoAuctionConfig(
 	}
 
 	public AutoAuctionConfig withMacroStopCommand(String value) {
-		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, value, macroStartCommand,
+		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, value, macroStartCommand, nebulaMacroToggleKey,
 			returnToHubCommand, enabledByDefault, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
 	}
 
 	public AutoAuctionConfig withEnabledByDefault(boolean value) {
 		return new AutoAuctionConfig(apiBaseUrl, apiToken, discordWebhookUrl, discordMentionUserId, macroStopCommand,
-			macroStartCommand, returnToHubCommand, value, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
+			macroStartCommand, nebulaMacroToggleKey, returnToHubCommand, value, killThreshold, screenTimeoutMs, clickDelayMs, disconnectDelayMs);
 	}
 
 	private static String valueOrEmpty(String value) {
 		return value == null ? "" : value;
+	}
+
+	private static String valueOrDefault(String value, String defaultValue) {
+		String resolved = valueOrEmpty(value).trim();
+		return resolved.isEmpty() ? defaultValue : resolved;
 	}
 }

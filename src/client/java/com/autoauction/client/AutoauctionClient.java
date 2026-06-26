@@ -21,6 +21,7 @@ import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
+import com.autoauction.client.macro.NebulaMacroToggleKey;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
@@ -51,7 +52,6 @@ import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientLoginConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.screens.Screen;
@@ -83,6 +83,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 
@@ -909,32 +910,19 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void observeNebulaMacroKeybind(Minecraft client) {
-		if (client.options == null || client.options.keyMappings == null) {
+		if (config == null) {
 			return;
 		}
-		boolean isDown = false;
-		for (KeyMapping keyMapping : client.options.keyMappings) {
-			if (isNebulaMacroKeyMapping(keyMapping) && keyMapping.isDown()) {
-				isDown = true;
-				break;
-			}
+		OptionalInt keyCode = NebulaMacroToggleKey.resolve(config.nebulaMacroToggleKey());
+		if (keyCode.isEmpty()) {
+			nebulaMacroKeybindWasDown = false;
+			return;
 		}
+		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), keyCode.getAsInt()) == GLFW.GLFW_PRESS;
 		if (isDown && !nebulaMacroKeybindWasDown) {
-			recordManualMacroToggleIntent("Nebula keybind");
+			recordManualMacroToggleIntent("configured Nebula key " + config.nebulaMacroToggleKey());
 		}
 		nebulaMacroKeybindWasDown = isDown;
-	}
-
-	private boolean isNebulaMacroKeyMapping(KeyMapping keyMapping) {
-		if (keyMapping == null) {
-			return false;
-		}
-		String name = String.valueOf(keyMapping.getName()).toLowerCase(Locale.ROOT);
-		String category = String.valueOf(keyMapping.getCategory()).toLowerCase(Locale.ROOT);
-		String value = name + " " + category;
-		boolean nebula = value.contains("nebula");
-		boolean combatMacro = value.contains("combat") && value.contains("macro");
-		return nebula && (combatMacro || value.contains("togglemacro"));
 	}
 
 	private void recordManualMacroToggleIntent(String source) {
