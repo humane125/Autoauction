@@ -29,6 +29,15 @@ class MinecraftGameActionsTest {
 	}
 
 	@Test
+	void detectsOnlyCreateAuctionButton() {
+		assertTrue(MinecraftGameActions.isCreateAuctionButtonName("Create Auction"));
+
+		assertFalse(MinecraftGameActions.isCreateAuctionButtonName("Manage Auctions"));
+		assertFalse(MinecraftGameActions.isCreateAuctionButtonName("Create BIN Auction"));
+		assertFalse(MinecraftGameActions.isCreateAuctionButtonName("Auction Duration"));
+	}
+
+	@Test
 	void matchesInventoryItemNamesIgnoringCase() {
 		assertTrue(MinecraftGameActions.itemNameMatches("Ender Pearl", "ender pearl"));
 		assertTrue(MinecraftGameActions.itemNameMatches("Enchanted Ender Pearl", "ender pearl"));

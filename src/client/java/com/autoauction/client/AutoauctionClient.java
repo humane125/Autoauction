@@ -3256,7 +3256,6 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private final class RealAuctionWorkflow {
 		private static final int AH_CREATE_AUCTION_SLOT = 15;
-		private static final int MANAGE_AUCTIONS_CREATE_AUCTION_SLOT = 24;
 		private static final int CREATE_BIN_ITEM_SLOT = 13;
 		private static final int CREATE_BIN_BUTTON_SLOT = 29;
 		private static final int CREATE_BIN_PRICE_SLOT = 31;
@@ -3474,8 +3473,10 @@ public class AutoauctionClient implements ClientModInitializer {
 						return;
 					}
 
-					debug(client, "Clicking Create Auction.");
-					actions.clickSlot(client, AH_CREATE_AUCTION_SLOT);
+					int slot = actions.findCreateAuctionButtonSlot(client)
+						.orElseThrow(() -> missingCreateAuctionButton(client, "Auction House"));
+					debug(client, "Clicking Create Auction from slot " + slot + ".");
+					actions.clickSlot(client, slot);
 					transition(RealAuctionState.WAIT_CREATE_BIN, client);
 				}
 				case WAIT_MANAGE_AUCTIONS -> {
@@ -3486,8 +3487,10 @@ public class AutoauctionClient implements ClientModInitializer {
 					transition(RealAuctionState.CLICK_CREATE_FROM_MANAGE_AUCTIONS, client);
 				}
 				case CLICK_CREATE_FROM_MANAGE_AUCTIONS -> {
-					debug(client, "Clicking Create Auction from Manage Auctions.");
-					actions.clickSlot(client, MANAGE_AUCTIONS_CREATE_AUCTION_SLOT);
+					int slot = actions.findCreateAuctionButtonSlot(client)
+						.orElseThrow(() -> missingCreateAuctionButton(client, "Manage Auctions"));
+					debug(client, "Clicking Create Auction from Manage Auctions slot " + slot + ".");
+					actions.clickSlot(client, slot);
 					transition(RealAuctionState.WAIT_CREATE_BIN, client);
 				}
 				case WAIT_CREATE_BIN -> {
@@ -3660,6 +3663,13 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private void delay() {
 			nextActionAt = System.currentTimeMillis() + effectiveClickDelayMs();
+		}
+
+		private IllegalStateException missingCreateAuctionButton(Minecraft client, String screenName) {
+			for (String line : actions.describeOpenContainerSlots(client)) {
+				Autoauction.LOGGER.warn("AutoAuction missing Create Auction button dump: {}", line);
+			}
+			return new IllegalStateException("Create Auction button was not found on " + screenName);
 		}
 
 		private int effectiveClickDelayMs() {

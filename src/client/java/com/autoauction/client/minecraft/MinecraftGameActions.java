@@ -216,6 +216,10 @@ public final class MinecraftGameActions {
 		return findHandlerSlotByItemNameMatching(client, MinecraftGameActions::isSellInventoryConfirmName);
 	}
 
+	public Optional<Integer> findCreateAuctionButtonSlot(Minecraft client) {
+		return findHandlerSlotByItemNameMatching(client, MinecraftGameActions::isCreateAuctionButtonName);
+	}
+
 	private boolean screenTitleMatches(Minecraft client, Predicate<String> matcher) {
 		return client.screen != null && matcher.test(client.screen.getTitle().getString());
 	}
@@ -297,6 +301,10 @@ public final class MinecraftGameActions {
 
 	static boolean isSellInventoryConfirmName(String itemName) {
 		return containsIgnoreCase(itemName, "Selling whole inventory");
+	}
+
+	static boolean isCreateAuctionButtonName(String itemName) {
+		return itemNameExactlyMatches(itemName, "Create Auction");
 	}
 
 	static boolean itemNameMatches(String itemName, String expectedPart) {
