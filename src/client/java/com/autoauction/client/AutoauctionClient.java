@@ -19,6 +19,7 @@ import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
+import com.autoauction.client.lobby.LobbyCollisionController;
 import com.autoauction.client.macro.NebulaGuiInputTracker;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
@@ -128,6 +129,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private NebulaMacroController macroController;
 	private NebulaLatestLogWatcher nebulaLatestLogWatcher;
 	private final NebulaGuiInputTracker nebulaGuiInputTracker = new NebulaGuiInputTracker();
+	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
@@ -175,7 +177,8 @@ public class AutoauctionClient implements ClientModInitializer {
 				this::disconnectFromRemoteCommand,
 				transferSocketHandler(),
 				this::handleRemoteScreenshotRequest,
-				this::handleRemoteActionRequest
+				this::handleRemoteActionRequest,
+				this::handleRegisteredAccounts
 			);
 			this.notifier = new DiscordNotifier(config);
 			this.handoffClient = new AltManagerHandoffClient();
@@ -204,6 +207,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				observeNebulaGuiKeybind(client);
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
+				handleLobbyCollision(client);
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
 				if (realWorkflow != null) {
@@ -358,6 +362,14 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendRemoteClientLog("error", "Remote action failed: " + error.getMessage());
 			}
 		});
+	}
+
+	private void handleRegisteredAccounts(List<ModSocketClient.RegisteredAccount> accounts) {
+		List<String> usernames = (accounts == null ? List.<ModSocketClient.RegisteredAccount>of() : accounts).stream()
+			.map(ModSocketClient.RegisteredAccount::minecraftUsername)
+			.toList();
+		lobbyCollisionController.updateRegisteredAccounts(usernames);
+		sendRemoteDebugLog("info", "lobby", "Registered account collision list updated: " + usernames.size() + " accounts.");
 	}
 
 	private void sendRemoteClientCommand(Minecraft client, String content) {
@@ -1132,6 +1144,35 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendingAutoAuctionMacroToggleCommand = false;
 			}
 		}
+	}
+
+	private void handleLobbyCollision(Minecraft client) {
+		if (macroController == null || actions == null || client.player == null) {
+			return;
+		}
+		List<String> tabListLines = readTabListLines(client);
+		SkyBlockStatus status = SkyBlockStatus.fromLines(readScoreboardLines(client), tabListLines);
+		lobbyCollisionController.tick(
+			new LobbyCollisionController.Snapshot(
+				currentUsername(client),
+				status,
+				tabListLines,
+				client.player != null,
+				System.currentTimeMillis()
+			),
+			macroController,
+			command -> runLobbyCollisionCommand(client, command)
+		);
+	}
+
+	private void runLobbyCollisionCommand(Minecraft client, String command) {
+		if (NebulaMacroController.isToggleCommand(command)) {
+			runMacroToggleCommand(client, command);
+			sendRemoteDebugLog("info", "lobby", "Lobby collision sent Nebula macro toggle.");
+			return;
+		}
+		actions.sendChatCommand(client, command);
+		sendRemoteDebugLog("info", "lobby", "Lobby collision sent command " + command + ".");
 	}
 
 	private void sendRemoteChatLog(String message) {

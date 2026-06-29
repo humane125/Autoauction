@@ -82,6 +82,17 @@ public final class ModSocketClient implements AutoCloseable {
 		ScreenshotHandler screenshotHandler,
 		RemoteActionHandler remoteActionHandler
 	) {
+		this(config, disconnectHandler, transferHandler, screenshotHandler, remoteActionHandler, RegisteredAccountsHandler.NOOP);
+	}
+
+	public ModSocketClient(
+		AutoAuctionConfig config,
+		Consumer<String> disconnectHandler,
+		TransferHandler transferHandler,
+		ScreenshotHandler screenshotHandler,
+		RemoteActionHandler remoteActionHandler,
+		RegisteredAccountsHandler registeredAccountsHandler
+	) {
 		this(
 			config,
 			new JavaWebSocketTransport(),
@@ -91,7 +102,7 @@ public final class ModSocketClient implements AutoCloseable {
 			transferHandler,
 			screenshotHandler,
 			remoteActionHandler,
-			RegisteredAccountsHandler.NOOP
+			registeredAccountsHandler
 		);
 	}
 
