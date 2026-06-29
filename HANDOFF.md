@@ -1,8 +1,8 @@
 # AutoAuction Handoff
 
-Date: 2026-06-23
+Date: 2026-06-29
 Branch: `main`
-Latest local commit before this handoff: `2373905 Restore inline transfer chat buttons`
+Latest pushed commit before this handoff: `a5d31ea Wire End lobby collision switching`
 
 ## Current Setup
 
@@ -17,6 +17,47 @@ Latest local commit before this handoff: `2373905 Restore inline transfer chat b
   - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test(1)\minecraft\mods`
 
 Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs/`, or Minecraft account data.
+
+## Test Later
+
+Test the new End lobby collision switch with real macro instances later. The code is pushed and the jar was copied locally, but this behavior still needs live Hypixel/Nebula verification because Nebula is HWID locked on this machine.
+
+Test scenario:
+
+- Start at least two registered accounts that can appear in The End.
+- Make sure AutoAuction websocket connects to the deployed API.
+- Confirm the mod receives the registered account list after socket auth.
+- Let one macro account enter The End where another registered account is visible in tablist.
+- Expected flow for the newly arriving account:
+  - Detect `Area: The End`.
+  - Detect another registered username in tablist, excluding itself.
+  - Ensure Nebula combat macro is off.
+  - Run `/is`.
+  - Wait about 1 second after player is loaded.
+  - Ensure Nebula combat macro is on again.
+  - If Nebula returns to another occupied End lobby, repeat the switch.
+- Confirm the older account already farming in the lobby does not also leave at the same time.
+
+## Latest Changes
+
+- Added End lobby collision switching:
+  - New `LobbyCollisionController` tracks registered usernames, current area, tablist names, macro state, and switch workflow state.
+  - Collision detection only runs in `The End`.
+  - The current Minecraft username is ignored when matching tablist names.
+  - Registered account matching is case-insensitive and works from tablist text with rank prefixes.
+  - Switch workflow sends Nebula toggle through the guarded client-command path, then `/is`, then toggles Nebula back on after player stability.
+- Mod websocket now requests `registered_accounts` after `auth_ok`.
+- Mod websocket parses incoming `registered_accounts` and passes the full registered username list into the collision controller.
+- Added tests:
+  - `ModSocketClientTest.requestsAndDispatchesRegisteredAccountsAfterAuthOk`
+  - `LobbyCollisionControllerTest`
+- Verified locally:
+  - `.\gradlew.bat --no-daemon test`
+  - `.\gradlew.bat --no-daemon build`
+- Built jar was copied to:
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2\minecraft\mods`
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test\minecraft\mods`
+  - `C:\Users\SoulP\AppData\Roaming\PrismLauncher\instances\26.1.2 test(1)\minecraft\mods`
 
 ## What Happened
 
