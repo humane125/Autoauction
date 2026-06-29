@@ -343,6 +343,37 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void requestsAndDispatchesRegisteredAccountsAfterAuthOk() {
+		FakeTransport transport = new FakeTransport();
+		List<List<ModSocketClient.RegisteredAccount>> accountEvents = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(
+			config,
+			transport,
+			30_000,
+			message -> {},
+			reason -> {},
+			ModSocketClient.TransferHandler.NOOP,
+			ModSocketClient.ScreenshotHandler.NOOP,
+			ModSocketClient.RemoteActionHandler.NOOP,
+			accountEvents::add
+		);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+		transport.message("{\"type\":\"registered_accounts\",\"accounts\":[{\"minecraftUsername\":\"FriendEndAlt\",\"status\":\"offline\"},{\"minecraftUsername\":\"OwnerEndAlt\",\"status\":\"hypixel\"}]}");
+
+		assertTrue(transport.connection.sentMessages.stream().anyMatch(message -> message.contains("\"type\":\"registered_accounts\"")));
+		assertEquals(1, accountEvents.size());
+		assertEquals("FriendEndAlt", accountEvents.getFirst().getFirst().minecraftUsername());
+		assertEquals("offline", accountEvents.getFirst().getFirst().status());
+		assertEquals("OwnerEndAlt", accountEvents.getFirst().get(1).minecraftUsername());
+		assertEquals("hypixel", accountEvents.getFirst().get(1).status());
+		client.close();
+	}
+
+	@Test
 	void invokesScreenshotHandlerForIncomingRequest() {
 		FakeTransport transport = new FakeTransport();
 		List<ModSocketClient.ScreenshotRequest> requests = new ArrayList<>();

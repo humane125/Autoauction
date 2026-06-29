@@ -41,6 +41,7 @@ public final class ModSocketClient implements AutoCloseable {
 	private final TransferHandler transferHandler;
 	private final ScreenshotHandler screenshotHandler;
 	private final RemoteActionHandler remoteActionHandler;
+	private final RegisteredAccountsHandler registeredAccountsHandler;
 
 	private Connection connection;
 	private ScheduledFuture<?> heartbeatTask;
@@ -89,7 +90,8 @@ public final class ModSocketClient implements AutoCloseable {
 			disconnectHandler,
 			transferHandler,
 			screenshotHandler,
-			remoteActionHandler
+			remoteActionHandler,
+			RegisteredAccountsHandler.NOOP
 		);
 	}
 
@@ -142,6 +144,30 @@ public final class ModSocketClient implements AutoCloseable {
 			config,
 			transport,
 			heartbeatIntervalMs,
+			logSink,
+			disconnectHandler,
+			transferHandler,
+			screenshotHandler,
+			remoteActionHandler,
+			RegisteredAccountsHandler.NOOP
+		);
+	}
+
+	ModSocketClient(
+		AutoAuctionConfig config,
+		Transport transport,
+		long heartbeatIntervalMs,
+		Consumer<String> logSink,
+		Consumer<String> disconnectHandler,
+		TransferHandler transferHandler,
+		ScreenshotHandler screenshotHandler,
+		RemoteActionHandler remoteActionHandler,
+		RegisteredAccountsHandler registeredAccountsHandler
+	) {
+		this(
+			config,
+			transport,
+			heartbeatIntervalMs,
 			DEFAULT_RECONNECT_INITIAL_DELAY_MS,
 			DEFAULT_RECONNECT_MAX_DELAY_MS,
 			DEFAULT_CONNECT_ATTEMPT_TIMEOUT_MS,
@@ -149,7 +175,8 @@ public final class ModSocketClient implements AutoCloseable {
 			disconnectHandler,
 			transferHandler,
 			screenshotHandler,
-			remoteActionHandler
+			remoteActionHandler,
+			registeredAccountsHandler
 		);
 	}
 
@@ -173,7 +200,8 @@ public final class ModSocketClient implements AutoCloseable {
 			reason -> {},
 			TransferHandler.NOOP,
 			ScreenshotHandler.NOOP,
-			RemoteActionHandler.NOOP
+			RemoteActionHandler.NOOP,
+			RegisteredAccountsHandler.NOOP
 		);
 	}
 
@@ -188,7 +216,8 @@ public final class ModSocketClient implements AutoCloseable {
 		Consumer<String> disconnectHandler,
 		TransferHandler transferHandler,
 		ScreenshotHandler screenshotHandler,
-		RemoteActionHandler remoteActionHandler
+		RemoteActionHandler remoteActionHandler,
+		RegisteredAccountsHandler registeredAccountsHandler
 	) {
 		this.config = config;
 		this.transport = transport;
@@ -202,6 +231,7 @@ public final class ModSocketClient implements AutoCloseable {
 		this.transferHandler = transferHandler == null ? TransferHandler.NOOP : transferHandler;
 		this.screenshotHandler = screenshotHandler == null ? ScreenshotHandler.NOOP : screenshotHandler;
 		this.remoteActionHandler = remoteActionHandler == null ? RemoteActionHandler.NOOP : remoteActionHandler;
+		this.registeredAccountsHandler = registeredAccountsHandler == null ? RegisteredAccountsHandler.NOOP : registeredAccountsHandler;
 		this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
 			Thread thread = new Thread(runnable, "autoauction-mod-socket");
 			thread.setDaemon(true);
@@ -313,6 +343,7 @@ public final class ModSocketClient implements AutoCloseable {
 		log("AutoAuction mod socket received " + type);
 		if (Objects.equals(type, "auth_ok")) {
 			sendDesiredStatus();
+			requestRegisteredAccounts();
 			startHeartbeat();
 			return;
 		}
@@ -337,6 +368,10 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 		if (Objects.equals(type, "transfer_accounts")) {
 			transferHandler.onAccounts(transferAccounts(message));
+			return;
+		}
+		if (Objects.equals(type, "registered_accounts")) {
+			registeredAccountsHandler.onAccounts(registeredAccounts(message));
 			return;
 		}
 		if (Objects.equals(type, "transfer_invite")) {
@@ -400,6 +435,25 @@ public final class ModSocketClient implements AutoCloseable {
 			}
 			JsonObject account = element.getAsJsonObject();
 			accounts.add(new TransferAccount(
+				stringProperty(account, "minecraftUsername", ""),
+				stringProperty(account, "status", "")
+			));
+		}
+		return accounts;
+	}
+
+	private List<RegisteredAccount> registeredAccounts(JsonObject message) {
+		List<RegisteredAccount> accounts = new ArrayList<>();
+		if (!message.has("accounts") || !message.get("accounts").isJsonArray()) {
+			return accounts;
+		}
+		JsonArray array = message.getAsJsonArray("accounts");
+		for (JsonElement element : array) {
+			if (!element.isJsonObject()) {
+				continue;
+			}
+			JsonObject account = element.getAsJsonObject();
+			accounts.add(new RegisteredAccount(
 				stringProperty(account, "minecraftUsername", ""),
 				stringProperty(account, "status", "")
 			));
@@ -620,6 +674,17 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent " + message.get("type").getAsString());
+		return true;
+	}
+
+	private synchronized boolean requestRegisteredAccounts() {
+		if (!authenticated || connection == null) {
+			return false;
+		}
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "registered_accounts");
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket requested registered_accounts");
 		return true;
 	}
 
@@ -977,7 +1042,17 @@ public final class ModSocketClient implements AutoCloseable {
 		void onAction(RemoteAction action);
 	}
 
+	public interface RegisteredAccountsHandler {
+		RegisteredAccountsHandler NOOP = accounts -> {
+		};
+
+		void onAccounts(List<RegisteredAccount> accounts);
+	}
+
 	public record TransferAccount(String minecraftUsername, String status) {
+	}
+
+	public record RegisteredAccount(String minecraftUsername, String status) {
 	}
 
 	public record TransferSession(String id, String senderUsername, String receiverUsername, String itemName) {
