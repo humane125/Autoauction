@@ -31,6 +31,7 @@ import com.autoauction.client.transfer.BazaarTransferEstimate;
 import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.EnderChestParkingPlan;
 import com.autoauction.client.transfer.HypixelBazaarClient;
+import com.autoauction.client.transfer.SenderParkingTracker;
 import com.autoauction.client.transfer.TransferAccountListRequests;
 import com.autoauction.client.transfer.TransferChatComponents;
 import com.autoauction.client.transfer.TransferCommandSuggestions;
@@ -121,6 +122,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private TransferController transferController;
 	private final TransferPurseTracker transferPurseTracker = new TransferPurseTracker();
 	private final TransferAccountListRequests transferAccountListRequests = new TransferAccountListRequests();
+	private final SenderParkingTracker senderParkingTracker = new SenderParkingTracker();
 	private DiscordNotifier notifier;
 	private AltManagerHandoffClient handoffClient;
 	private NebulaMacroController macroController;
@@ -157,8 +159,6 @@ public class AutoauctionClient implements ClientModInitializer {
 	private NebulaMacroController.ObservedState lastNebulaMacroStatusResult = NebulaMacroController.ObservedState.UNKNOWN;
 	private long lastNebulaMacroStatusResultAt;
 	private int autoRetoggleCount;
-	private String senderParkedItemName;
-	private int senderParkedStacks;
 	private PendingHandoff pendingHandoff;
 
 	@Override
@@ -1482,10 +1482,12 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void requestPreparedTransferRun(Minecraft client, String itemName, boolean loopContinuation) {
+		String senderUsername = currentUsername(client);
 		int quantity = actions.countInventoryItemsByName(client, itemName);
-		int parkedStacks = parkedStacksForItem(itemName);
-		if (senderParkedStacks > 0 && parkedStacks == 0) {
-			sendTransferFeedback("AutoAuction transfer run failed: parked stacks for " + senderParkedItemName + " must be restored before running " + itemName + ".");
+		int parkedStacks = parkedStacksForItem(senderUsername, itemName);
+		if (senderParkingTracker.restoreRequiredBeforeRunning(senderUsername, itemName)) {
+			SenderParkingTracker.ParkedStacks parked = senderParkingTracker.restoreRequest(senderUsername).orElseThrow();
+			sendTransferFeedback("AutoAuction transfer run failed: parked stacks for " + parked.itemName() + " must be restored before running " + itemName + ".");
 			transferLoopGoal = null;
 			startSenderEnderChestRestoreIfNeeded(client);
 			return;
@@ -1506,6 +1508,11 @@ public class AutoauctionClient implements ClientModInitializer {
 		CompletableFuture
 			.supplyAsync(() -> HypixelBazaarClient.fetchQuickStatus(productId))
 			.thenAccept(status -> Minecraft.getInstance().execute(() -> {
+				if (!currentUsername(Minecraft.getInstance()).equalsIgnoreCase(senderUsername)) {
+					sendTransferFeedback("AutoAuction transfer run stopped: sender account changed before safe stack planning finished.");
+					transferLoopGoal = null;
+					return;
+				}
 				if (status.isEmpty()) {
 					sendTransferFeedback("AutoAuction transfer run failed: Bazaar price unavailable for " + productId + ".");
 					transferLoopGoal = null;
@@ -1536,6 +1543,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					return;
 				}
 				senderPrepareTransferWorkflow = new SenderPrepareTransferWorkflow(
+					senderUsername,
 					itemName,
 					loopContinuation,
 					purse.getAsLong(),
@@ -1569,11 +1577,18 @@ public class AutoauctionClient implements ClientModInitializer {
 		return Math.max(0D, receiverSellRevenue - receiverBuyCost);
 	}
 
-	private int parkedStacksForItem(String itemName) {
-		if (senderParkedStacks <= 0 || senderParkedItemName == null || !senderParkedItemName.equalsIgnoreCase(itemName)) {
-			return 0;
-		}
-		return senderParkedStacks;
+	private int parkedStacksForItem(String username, String itemName) {
+		return senderParkingTracker.parkedStacks(username, itemName);
+	}
+
+	private String currentUsername(Minecraft client) {
+		return client == null || client.getUser() == null ? "" : client.getUser().getName();
+	}
+
+	static boolean sameMinecraftUsername(String left, String right) {
+		String cleanLeft = String.valueOf(left == null ? "" : left).trim();
+		String cleanRight = String.valueOf(right == null ? "" : right).trim();
+		return !cleanLeft.isBlank() && !cleanRight.isBlank() && cleanLeft.equalsIgnoreCase(cleanRight);
 	}
 
 	private String transferPrepareStopReasonMessage(EnderChestParkingPlan.StopReason reason) {
@@ -1586,10 +1601,13 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startSenderEnderChestRestoreIfNeeded(Minecraft client) {
-		if (senderEnderChestRestoreWorkflow != null || senderParkedStacks <= 0 || senderParkedItemName == null || senderParkedItemName.isBlank()) {
+		String username = currentUsername(client);
+		Optional<SenderParkingTracker.ParkedStacks> restoreRequest = senderParkingTracker.restoreRequest(username);
+		if (senderEnderChestRestoreWorkflow != null || restoreRequest.isEmpty()) {
 			return;
 		}
-		senderEnderChestRestoreWorkflow = new SenderEnderChestRestoreWorkflow(senderParkedItemName, senderParkedStacks);
+		SenderParkingTracker.ParkedStacks parked = restoreRequest.get();
+		senderEnderChestRestoreWorkflow = new SenderEnderChestRestoreWorkflow(username, parked.itemName(), parked.stacks());
 		senderEnderChestRestoreWorkflow.start(client);
 	}
 
@@ -2357,6 +2375,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private final class SenderPrepareTransferWorkflow {
+		private final String senderUsername;
 		private final String itemName;
 		private final boolean loopContinuation;
 		private final long senderPurse;
@@ -2370,6 +2389,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private long stateStartedAt;
 
 		private SenderPrepareTransferWorkflow(
+			String senderUsername,
 			String itemName,
 			boolean loopContinuation,
 			long senderPurse,
@@ -2377,6 +2397,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			double estimatedProfitPerItem,
 			long remainingTargetCoins
 		) {
+			this.senderUsername = senderUsername;
 			this.itemName = itemName;
 			this.loopContinuation = loopContinuation;
 			this.senderPurse = Math.max(0L, senderPurse);
@@ -2392,6 +2413,13 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private void tick(Minecraft client) {
 			if (state == SenderPrepareTransferState.DONE || state == SenderPrepareTransferState.ERROR || System.currentTimeMillis() < nextActionAt) {
+				return;
+			}
+			if (!sameMinecraftUsername(currentUsername(client), senderUsername)) {
+				state = SenderPrepareTransferState.ERROR;
+				senderPrepareTransferWorkflow = null;
+				transferLoopGoal = null;
+				sendTransferFeedback("AutoAuction transfer preparation stopped: sender account changed before EC parking finished.");
 				return;
 			}
 			try {
@@ -2412,13 +2440,14 @@ public class AutoauctionClient implements ClientModInitializer {
 						timeout(client, config.screenTimeoutMs(), "Ender Chest did not open for sender transfer preparation");
 						return;
 					}
-					if (senderParkedStacks > 0 && parkedStacksForItem(itemName) == 0) {
-						fail(client, "parked stacks for " + senderParkedItemName + " must be restored before preparing " + itemName);
+					if (senderParkingTracker.restoreRequiredBeforeRunning(senderUsername, itemName)) {
+						SenderParkingTracker.ParkedStacks parked = senderParkingTracker.restoreRequest(senderUsername).orElseThrow();
+						fail(client, "parked stacks for " + parked.itemName() + " must be restored before preparing " + itemName);
 						return;
 					}
 					int inventoryQuantity = actions.countInventoryItemsByName(client, itemName);
 					int emptyEcSlots = actions.emptyHandlerSlotsInRange(client, EC_STORAGE_FIRST_SLOT, EC_STORAGE_LAST_SLOT).size();
-					int currentParkedStacks = parkedStacksForItem(itemName);
+					int currentParkedStacks = parkedStacksForItem(senderUsername, itemName);
 					plan = EnderChestParkingPlan.createForPersistentParking(
 						inventoryQuantity,
 						currentParkedStacks,
@@ -2434,9 +2463,6 @@ public class AutoauctionClient implements ClientModInitializer {
 						return;
 					}
 					desiredParkedStacks = plan.requiredParkSlots();
-					if (desiredParkedStacks > 0 || senderParkedStacks > 0) {
-						senderParkedItemName = itemName;
-					}
 					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName,
 						"safe stack plan: transfer " + plan.transferQuantity()
 							+ ", desired parked stacks " + desiredParkedStacks
@@ -2448,7 +2474,7 @@ public class AutoauctionClient implements ClientModInitializer {
 						timeout(client, config.screenTimeoutMs(), "Ender Chest closed while parking sender stacks");
 						return;
 					}
-					if (senderParkedStacks >= desiredParkedStacks) {
+					if (parkedStacksForItem(senderUsername, itemName) >= desiredParkedStacks) {
 						transition(nextAdjustmentState(), client);
 						return;
 					}
@@ -2460,8 +2486,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					int slot = fullStacks.getFirst();
 					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName, "quick-move extra stack from slot " + slot + " to EC"));
 					actions.quickMoveSlot(client, slot);
-					senderParkedStacks++;
-					senderParkedItemName = itemName;
+					senderParkingTracker.recordParkedStack(senderUsername, itemName);
 					transition(nextAdjustmentState(), client);
 				}
 				case RESTORE_STACK -> {
@@ -2469,7 +2494,7 @@ public class AutoauctionClient implements ClientModInitializer {
 						timeout(client, config.screenTimeoutMs(), "Ender Chest closed while restoring sender stacks for next run");
 						return;
 					}
-					if (senderParkedStacks <= desiredParkedStacks) {
+					if (parkedStacksForItem(senderUsername, itemName) <= desiredParkedStacks) {
 						transition(nextAdjustmentState(), client);
 						return;
 					}
@@ -2481,10 +2506,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					int slot = fullStacks.getFirst();
 					debug(client, transferStep("sender", "prepare", plan.transferQuantity(), itemName, "quick-move parked stack from EC slot " + slot + " to inventory"));
 					actions.quickMoveSlot(client, slot);
-					senderParkedStacks = Math.max(0, senderParkedStacks - 1);
-					if (senderParkedStacks == 0) {
-						senderParkedItemName = null;
-					}
+					senderParkingTracker.recordRestoredStack(senderUsername, itemName);
 					transition(nextAdjustmentState(), client);
 				}
 				case CLOSE_EC -> {
@@ -2504,10 +2526,11 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 
 		private SenderPrepareTransferState nextAdjustmentState() {
-			if (senderParkedStacks < desiredParkedStacks) {
+			int currentParkedStacks = parkedStacksForItem(senderUsername, itemName);
+			if (currentParkedStacks < desiredParkedStacks) {
 				return SenderPrepareTransferState.PARK_STACK;
 			}
-			if (senderParkedStacks > desiredParkedStacks) {
+			if (currentParkedStacks > desiredParkedStacks) {
 				return SenderPrepareTransferState.RESTORE_STACK;
 			}
 			return SenderPrepareTransferState.CLOSE_EC;
@@ -2556,13 +2579,15 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private final class SenderEnderChestRestoreWorkflow {
+		private final String senderUsername;
 		private final String itemName;
 		private int stacksToRestore;
 		private SenderEnderChestRestoreState state = SenderEnderChestRestoreState.OPEN_EC;
 		private long nextActionAt;
 		private long stateStartedAt;
 
-		private SenderEnderChestRestoreWorkflow(String itemName, int stacksToRestore) {
+		private SenderEnderChestRestoreWorkflow(String senderUsername, String itemName, int stacksToRestore) {
+			this.senderUsername = senderUsername;
 			this.itemName = itemName;
 			this.stacksToRestore = Math.max(0, stacksToRestore);
 		}
@@ -2575,6 +2600,12 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private void tick(Minecraft client) {
 			if (state == SenderEnderChestRestoreState.DONE || state == SenderEnderChestRestoreState.ERROR || System.currentTimeMillis() < nextActionAt) {
+				return;
+			}
+			if (!sameMinecraftUsername(currentUsername(client), senderUsername)) {
+				state = SenderEnderChestRestoreState.ERROR;
+				senderEnderChestRestoreWorkflow = null;
+				sendTransferFeedback("AutoAuction transfer EC restore skipped: sender account changed.");
 				return;
 			}
 			try {
@@ -2620,7 +2651,7 @@ public class AutoauctionClient implements ClientModInitializer {
 						itemName, "quick-move parked stack from EC slot " + slot + " to inventory"));
 					actions.quickMoveSlot(client, slot);
 					stacksToRestore--;
-					senderParkedStacks = Math.max(0, senderParkedStacks - 1);
+					senderParkingTracker.recordRestoredStack(senderUsername, itemName);
 					transition(stacksToRestore > 0 ? SenderEnderChestRestoreState.RESTORE_STACK : SenderEnderChestRestoreState.CLOSE_EC, client);
 				}
 				case CLOSE_EC -> {
@@ -2659,8 +2690,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void done(Minecraft client, String message) {
 			state = SenderEnderChestRestoreState.DONE;
 			senderEnderChestRestoreWorkflow = null;
-			senderParkedItemName = null;
-			senderParkedStacks = 0;
+			senderParkingTracker.clear(senderUsername);
 			sendDebugFeedback(client, message);
 		}
 

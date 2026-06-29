@@ -80,6 +80,14 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void minecraftUsernameComparisonIgnoresCaseAndRejectsBlanks() {
+		assertEquals(true, AutoauctionClient.sameMinecraftUsername("SenderOne", "senderone"));
+		assertEquals(false, AutoauctionClient.sameMinecraftUsername("SenderOne", "OtherSender"));
+		assertEquals(false, AutoauctionClient.sameMinecraftUsername("", "OtherSender"));
+		assertEquals(false, AutoauctionClient.sameMinecraftUsername("SenderOne", ""));
+	}
+
+	@Test
 	void retoggleStatusShowsCountObservedAndDesiredState() {
 		assertEquals(
 			"AutoAuction retoggle status: count=3, observed=OFF, desired=ON.",
