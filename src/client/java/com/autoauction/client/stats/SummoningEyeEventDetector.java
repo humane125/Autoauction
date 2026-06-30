@@ -8,6 +8,7 @@ import java.util.regex.Pattern;
 public final class SummoningEyeEventDetector {
 	private static final Pattern SOLD_PATTERN = Pattern.compile("(?i)\\bsold\\s+([0-9,]+)x\\s+summoning eye\\b");
 	private static final Pattern SELL_ORDER_PATTERN = Pattern.compile("(?i)\\bsell order setup!\\s+([0-9,]+)x\\s+summoning eye\\s+at\\s+([0-9,]+)\\s+coins each\\b");
+	private static final Pattern SELL_OFFER_PATTERN = Pattern.compile("(?i)\\bsell offer setup!\\s+([0-9,]+)x\\s+summoning eye\\s+for\\s+([0-9,]+)\\s+coins?\\b");
 
 	private SummoningEyeEventDetector() {
 	}
@@ -25,6 +26,12 @@ public final class SummoningEyeEventDetector {
 				parseInt(sellOrder.group(1), 1),
 				parseInt(sellOrder.group(2), 0)
 			));
+		}
+		Matcher sellOffer = SELL_OFFER_PATTERN.matcher(clean);
+		if (sellOffer.find()) {
+			int quantity = parseInt(sellOffer.group(1), 1);
+			int totalCoins = parseInt(sellOffer.group(2), 0);
+			return Optional.of(new SummoningEyeEvent("sell_order", quantity, pricePerItem(totalCoins, quantity)));
 		}
 		Matcher sold = SOLD_PATTERN.matcher(clean);
 		if (sold.find()) {
@@ -46,5 +53,12 @@ public final class SummoningEyeEventDetector {
 		} catch (NumberFormatException ignored) {
 			return fallback;
 		}
+	}
+
+	private static int pricePerItem(int totalCoins, int quantity) {
+		if (totalCoins <= 0 || quantity <= 0) {
+			return 0;
+		}
+		return Math.max(0, totalCoins / quantity);
 	}
 }
