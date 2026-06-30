@@ -1,8 +1,8 @@
 # AutoAuction Handoff
 
-Date: 2026-06-29
+Date: 2026-06-30
 Branch: `main`
-Latest pushed commit before this handoff: `a5d31ea Wire End lobby collision switching`
+Latest local commit before this handoff: `c86cac7 Send lightweight account wealth stats`
 
 ## Current Setup
 
@@ -19,6 +19,16 @@ Latest pushed commit before this handoff: `a5d31ea Wire End lobby collision swit
 Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs/`, or Minecraft account data.
 
 ## Test Later
+
+Test account wealth stat reporting with real Hypixel/Nebula instances after the API/dashboard slice is deployed:
+
+- Confirm AutoAuction websocket authenticates and the dashboard account card starts showing wealth stats for that Minecraft account.
+- Equip all four Final Destination armor pieces and confirm the remote Account Wealth panel shows per-piece kills and lowest-piece kills.
+- Confirm purse updates at least every 30 seconds, and faster when values change.
+- Drop a Summoning Eye and confirm only a tiny `summoning_eye_event` is sent, not full logs/screenshots.
+- Create a Summoning Eye sell order and confirm the dashboard moves eyes from held to listed with the detected per-eye price.
+- Instant-sell Summoning Eyes and confirm the dashboard removes the sold eye quantity from held/listed counts.
+- Switch accounts through Alt Manager and confirm stats stay tied to the Minecraft UUID, not the Prism instance.
 
 Test the new End lobby collision switch with real macro instances later. The code is pushed and the jar was copied locally, but this behavior still needs live Hypixel/Nebula verification because Nebula is HWID locked on this machine.
 
@@ -39,6 +49,24 @@ Test scenario:
 - Confirm the older account already farming in the lobby does not also leave at the same time.
 
 ## Latest Changes
+
+- Added lightweight account wealth reporting:
+  - New `AccountStatsSnapshot` payload sends purse and Final Destination armor kills.
+  - New `SummoningEyeEventDetector` parses compact chat events for:
+    - Summoning Eye drops
+    - Bazaar instant-sell completions
+    - Bazaar sell-order setup with per-eye price
+  - `ModSocketClient.sendAccountStats` sends `account_stats`.
+  - `ModSocketClient.sendSummoningEyeEvent` sends `summoning_eye_event`.
+  - AutoAuction polls stats every 20 ticks but only sends when values change or a 30 second heartbeat elapses.
+  - Chat handling sends small structured eye events; it does not stream full logs for wealth stats.
+- Recent local commits:
+  - `ef5ae56 Cancel lobby collision on manual macro stop`
+  - `c86cac7 Send lightweight account wealth stats`
+- Verified locally:
+  - `.\gradlew.bat --no-daemon test`
+  - `.\gradlew.bat --no-daemon build`
+- Built `build\libs\autoauction-1.0.0.jar` and copied it to all three active Prism mod folders on 2026-06-30.
 
 - Added End lobby collision switching:
   - New `LobbyCollisionController` tracks registered usernames, current area, tablist names, macro state, and switch workflow state.
