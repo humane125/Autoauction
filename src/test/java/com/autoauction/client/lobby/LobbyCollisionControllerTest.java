@@ -48,18 +48,21 @@ class LobbyCollisionControllerTest {
 		controller.tick(snapshot("CurrentAlt", "The End", List.of("[VIP] FriendEndAlt", "CurrentAlt"), true, 1_100L), macro, commands::add);
 		macro.onChatMessage("NebulaClient > Combat Macro: Disabled");
 		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 1_200L), macro, commands::add);
-		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 1_900L), macro, commands::add);
-		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 2_300L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 2_500L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 2_700L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 7_699L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 7_700L), macro, commands::add);
 
 		assertEquals(List.of(
 			NebulaMacroController.TOGGLE_COMMAND,
 			"/is",
 			NebulaMacroController.TOGGLE_COMMAND
 		), commands);
+		assertEquals(1, controller.collisionSwitchCount());
 	}
 
 	@Test
-	void canSwitchAgainAfterItsOwnMacroRestartReturnsToAnotherOccupiedEndLobby() {
+	void waitsBeforeSwitchingAgainAfterItsOwnMacroRestartReturnsToAnotherOccupiedEndLobby() {
 		LobbyCollisionController controller = new LobbyCollisionController();
 		NebulaMacroController macro = enabledMacro();
 		List<String> commands = new ArrayList<>();
@@ -69,9 +72,13 @@ class LobbyCollisionControllerTest {
 		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 1_100L), macro, commands::add);
 		macro.onChatMessage("NebulaClient > Combat Macro: Disabled");
 		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 1_200L), macro, commands::add);
-		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 2_300L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 2_700L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 7_700L), macro, commands::add);
 		macro.onChatMessage("NebulaClient > Combat Macro: Enabled");
-		controller.tick(snapshot("CurrentAlt", "The End", List.of("SecondFriendAlt", "CurrentAlt"), true, 5_000L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("SecondFriendAlt", "CurrentAlt"), true, 15_699L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("SecondFriendAlt", "CurrentAlt"), true, 15_700L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("SecondFriendAlt", "CurrentAlt"), true, 23_698L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("SecondFriendAlt", "CurrentAlt"), true, 23_699L), macro, commands::add);
 
 		assertEquals(List.of(
 			NebulaMacroController.TOGGLE_COMMAND,
@@ -79,6 +86,7 @@ class LobbyCollisionControllerTest {
 			NebulaMacroController.TOGGLE_COMMAND,
 			NebulaMacroController.TOGGLE_COMMAND
 		), commands);
+		assertEquals(2, controller.collisionSwitchCount());
 	}
 
 	private static NebulaMacroController enabledMacro() {

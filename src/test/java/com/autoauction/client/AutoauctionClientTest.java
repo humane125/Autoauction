@@ -90,12 +90,12 @@ class AutoauctionClientTest {
 	@Test
 	void retoggleStatusShowsCountObservedAndDesiredState() {
 		assertEquals(
-			"AutoAuction retoggle status: count=3, observed=OFF, desired=ON.",
-			AutoauctionClient.retoggleStatusMessage(3, NebulaMacroController.ObservedState.OFF, true)
+			"AutoAuction retoggle status: count=3, lobbyCollisions=2, observed=OFF, desired=ON.",
+			AutoauctionClient.retoggleStatusMessage(3, 2, NebulaMacroController.ObservedState.OFF, true)
 		);
 		assertEquals(
-			"AutoAuction retoggle status: count=0, observed=UNKNOWN, desired=OFF.",
-			AutoauctionClient.retoggleStatusMessage(0, NebulaMacroController.ObservedState.UNKNOWN, false)
+			"AutoAuction retoggle status: count=0, lobbyCollisions=0, observed=UNKNOWN, desired=OFF.",
+			AutoauctionClient.retoggleStatusMessage(0, 0, NebulaMacroController.ObservedState.UNKNOWN, false)
 		);
 	}
 
