@@ -19,7 +19,7 @@ public final class LobbyCollisionController {
 	private static final long DISABLED_BEFORE_IS_WAIT_MS = 1_500L;
 	private static final long AFTER_IS_WAIT_MS = 5_000L;
 	private static final long RESCAN_COOLDOWN_MS = 8_000L;
-	private static final String ISLAND_COMMAND = "/is";
+	private static final String ISLAND_COMMAND = "/hub";
 
 	private final Set<String> registeredUsernames = new HashSet<>();
 	private State state = State.IDLE;

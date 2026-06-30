@@ -55,7 +55,7 @@ class LobbyCollisionControllerTest {
 
 		assertEquals(List.of(
 			NebulaMacroController.TOGGLE_COMMAND,
-			"/is",
+			"/hub",
 			NebulaMacroController.TOGGLE_COMMAND
 		), commands);
 		assertEquals(1, controller.collisionSwitchCount());
@@ -82,7 +82,7 @@ class LobbyCollisionControllerTest {
 
 		assertEquals(List.of(
 			NebulaMacroController.TOGGLE_COMMAND,
-			"/is",
+			"/hub",
 			NebulaMacroController.TOGGLE_COMMAND,
 			NebulaMacroController.TOGGLE_COMMAND
 		), commands);
