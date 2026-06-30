@@ -26,6 +26,8 @@ import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.macro.NebulaMacroToggleKey;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
+import com.autoauction.client.stats.AccountStatsSnapshot;
+import com.autoauction.client.stats.SummoningEyeEventDetector;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
 import com.autoauction.client.transfer.BazaarProductId;
 import com.autoauction.client.transfer.BazaarTransferEstimate;
@@ -106,6 +108,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
 	private static final int NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS = 1;
+	private static final int ACCOUNT_STATS_POLL_TICKS = 20;
+	private static final long ACCOUNT_STATS_HEARTBEAT_MS = 30_000L;
 	private static final long NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS = 250L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
@@ -133,6 +137,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
+	private AccountStatsSnapshot lastSentAccountStats;
+	private long lastSentAccountStatsAt;
 	private boolean sendingAutoAuctionMacroToggleCommand;
 	private boolean nebulaMacroKeybindWasDown;
 	private Path cachedNebulaGuiConfigPath;
@@ -236,6 +242,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				tickCounter++;
 				if (tickCounter % 10 == 0) {
 					controller.observeArmor(actions.readEquippedFinalDestinationArmor(client));
+				}
+				if (tickCounter % ACCOUNT_STATS_POLL_TICKS == 0) {
+					sendAccountStatsIfNeeded(client);
 				}
 				if (!workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
 					workflowStarted = true;
@@ -644,12 +653,17 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void registerMessageHandlers() {
 		ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, params, timestamp) -> {
-			handleMacroChatMessage(message.getString());
+			String text = message.getString();
+			handleMacroChatMessage(text);
+			handleSummoningEyeChatMessage(text);
 			sendRemoteChatLog(message);
 		});
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			String text = message.getString();
 			handleMacroChatMessage(text);
+			if (!overlay) {
+				handleSummoningEyeChatMessage(text);
+			}
 			if (!overlay) {
 				sendRemoteChatLog(message);
 			}
@@ -955,6 +969,13 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private void handleSummoningEyeChatMessage(String text) {
+		if (modSocketClient == null) {
+			return;
+		}
+		SummoningEyeEventDetector.detect(text).ifPresent(event -> modSocketClient.sendSummoningEyeEvent(event));
+	}
+
 	private void reportNebulaMacroIntentIfChanged(NebulaMacroController.ObservedState beforeState, boolean beforeDesiredOn) {
 		NebulaMacroController.ObservedState observedState = macroController.observedState();
 		boolean desiredOn = macroController.desiredOn();
@@ -1125,6 +1146,46 @@ public class AutoauctionClient implements ClientModInitializer {
 		} catch (Exception error) {
 			Autoauction.LOGGER.debug("AutoAuction could not poll latest.log for Nebula macro messages", error);
 		}
+	}
+
+	private void sendAccountStatsIfNeeded(Minecraft client) {
+		if (modSocketClient == null || actions == null || client.player == null) {
+			return;
+		}
+		Optional<AccountStatsSnapshot> snapshot = currentAccountStatsSnapshot(client);
+		if (snapshot.isEmpty()) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (snapshot.get().equals(lastSentAccountStats) && now - lastSentAccountStatsAt < ACCOUNT_STATS_HEARTBEAT_MS) {
+			return;
+		}
+		if (modSocketClient.sendAccountStats(snapshot.get())) {
+			lastSentAccountStats = snapshot.get();
+			lastSentAccountStatsAt = now;
+		}
+	}
+
+	private Optional<AccountStatsSnapshot> currentAccountStatsSnapshot(Minecraft client) {
+		OptionalLong purse = currentSkyBlockStatus(client).purse();
+		if (purse.isEmpty()) {
+			return Optional.empty();
+		}
+		EnumMap<ArmorPiece, ArmorSnapshot> armor = actions.readEquippedFinalDestinationArmor(client);
+		ArmorSnapshot helmet = armor.get(ArmorPiece.HELMET);
+		ArmorSnapshot chestplate = armor.get(ArmorPiece.CHESTPLATE);
+		ArmorSnapshot leggings = armor.get(ArmorPiece.LEGGINGS);
+		ArmorSnapshot boots = armor.get(ArmorPiece.BOOTS);
+		if (helmet == null || chestplate == null || leggings == null || boots == null) {
+			return Optional.empty();
+		}
+		return Optional.of(new AccountStatsSnapshot(
+			purse.getAsLong(),
+			helmet.kills(),
+			chestplate.kills(),
+			leggings.kills(),
+			boots.kills()
+		));
 	}
 
 	private void sendRemoteClientLog(String level, String message) {

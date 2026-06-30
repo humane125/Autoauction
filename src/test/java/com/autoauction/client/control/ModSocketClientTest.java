@@ -2,6 +2,8 @@ package com.autoauction.client.control;
 
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.domain.ModAccountStatusDetector;
+import com.autoauction.client.stats.AccountStatsSnapshot;
+import com.autoauction.client.stats.SummoningEyeEvent;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -469,6 +471,39 @@ class ModSocketClientTest {
 		assertTrue(logPayload.contains("\"color\":\"#55FF55\""));
 		assertTrue(logPayload.contains("\"bold\":true"));
 		assertFalse(logPayload.contains("hpx_secret_remote_key"));
+		client.close();
+	}
+
+	@Test
+	void sendsAccountStatsAndSummoningEyeEventsAfterAuthOkWithoutLeakingSecrets() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_secret_stats_key");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+
+		assertTrue(client.sendAccountStats(new AccountStatsSnapshot(12_000_000L, 25_000, 25_001, 25_002, 25_003)));
+		assertTrue(client.sendSummoningEyeEvent(new SummoningEyeEvent("sell_order", 1, 1_500_000)));
+
+		String statsPayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"account_stats\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(statsPayload.contains("\"purse\":12000000"));
+		assertTrue(statsPayload.contains("\"finalDestinationKills\""));
+		assertTrue(statsPayload.contains("\"helmet\":25000"));
+		assertFalse(statsPayload.contains("hpx_secret_stats_key"));
+
+		String eyePayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"summoning_eye_event\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(eyePayload.contains("\"action\":\"sell_order\""));
+		assertTrue(eyePayload.contains("\"quantity\":1"));
+		assertTrue(eyePayload.contains("\"pricePerEye\":1500000"));
+		assertFalse(eyePayload.contains("hpx_secret_stats_key"));
 		client.close();
 	}
 

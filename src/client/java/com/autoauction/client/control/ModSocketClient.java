@@ -3,6 +3,8 @@ package com.autoauction.client.control;
 import com.autoauction.Autoauction;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.domain.ModAccountStatusDetector;
+import com.autoauction.client.stats.AccountStatsSnapshot;
+import com.autoauction.client.stats.SummoningEyeEvent;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -676,6 +678,40 @@ public final class ModSocketClient implements AutoCloseable {
 		}
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent client_log");
+		return true;
+	}
+
+	public synchronized boolean sendAccountStats(AccountStatsSnapshot snapshot) {
+		if (!authenticated || connection == null || snapshot == null) {
+			return false;
+		}
+		JsonObject kills = new JsonObject();
+		kills.addProperty("helmet", Math.max(0, snapshot.helmetKills()));
+		kills.addProperty("chestplate", Math.max(0, snapshot.chestplateKills()));
+		kills.addProperty("leggings", Math.max(0, snapshot.leggingsKills()));
+		kills.addProperty("boots", Math.max(0, snapshot.bootsKills()));
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "account_stats");
+		message.addProperty("purse", Math.max(0L, snapshot.purse()));
+		message.add("finalDestinationKills", kills);
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket sent account_stats");
+		return true;
+	}
+
+	public synchronized boolean sendSummoningEyeEvent(SummoningEyeEvent event) {
+		if (!authenticated || connection == null || event == null || event.action().isBlank()) {
+			return false;
+		}
+		JsonObject message = new JsonObject();
+		message.addProperty("type", "summoning_eye_event");
+		message.addProperty("action", event.action());
+		message.addProperty("quantity", Math.max(1, event.quantity()));
+		if (event.pricePerEye() > 0) {
+			message.addProperty("pricePerEye", event.pricePerEye());
+		}
+		connection.send(GSON.toJson(message));
+		log("AutoAuction mod socket sent summoning_eye_event");
 		return true;
 	}
 
