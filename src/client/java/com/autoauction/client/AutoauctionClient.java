@@ -27,6 +27,7 @@ import com.autoauction.client.macro.NebulaMacroToggleKey;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.stats.AccountStatsSnapshot;
+import com.autoauction.client.stats.AccountStatsSendPolicy;
 import com.autoauction.client.stats.SummoningEyeEventDetector;
 import com.autoauction.client.transfer.BazaarTransferWorkflow;
 import com.autoauction.client.transfer.BazaarProductId;
@@ -109,7 +110,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
 	private static final int NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS = 1;
 	private static final int ACCOUNT_STATS_POLL_TICKS = 20;
-	private static final long ACCOUNT_STATS_HEARTBEAT_MS = 30_000L;
+	private static final long ACCOUNT_STATS_SEND_INTERVAL_MS = 30_000L;
 	private static final long NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS = 250L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
@@ -1157,7 +1158,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		long now = System.currentTimeMillis();
-		if (snapshot.get().equals(lastSentAccountStats) && now - lastSentAccountStatsAt < ACCOUNT_STATS_HEARTBEAT_MS) {
+		if (!AccountStatsSendPolicy.shouldSend(snapshot.get(), lastSentAccountStats, lastSentAccountStatsAt, now, ACCOUNT_STATS_SEND_INTERVAL_MS)) {
 			return;
 		}
 		if (modSocketClient.sendAccountStats(snapshot.get())) {
