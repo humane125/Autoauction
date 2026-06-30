@@ -940,6 +940,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			boolean beforeDesiredOn = macroController.desiredOn();
 			if (nebulaGuiInputTracker.maybeOpen()) {
 				macroController.onGuiChatMessage(text);
+				if (parsedState.orElse(NebulaMacroController.ObservedState.UNKNOWN) == NebulaMacroController.ObservedState.OFF
+					&& !macroController.desiredOn()) {
+					cancelLobbyCollisionForManualMacroStop("Nebula GUI macro status");
+				}
 			} else {
 				macroController.onChatMessage(text);
 			}
@@ -973,6 +977,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		boolean escapeDown = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_ESCAPE) == GLFW.GLFW_PRESS;
 		if (nebulaGuiInputTracker.tick(client.screen != null, guiKeyDown, escapeDown) && macroController != null) {
 			macroController.recordManualDisableIntent();
+			cancelLobbyCollisionForManualMacroStop("Nebula GUI opened");
 			sendRemoteDebugLog("info", "nebula", "Nebula GUI opened; treating macro disable as manual intent and pausing auto-retoggle.");
 		}
 	}
@@ -1071,7 +1076,15 @@ public class AutoauctionClient implements ClientModInitializer {
 			case DISABLING -> "Manual Nebula combat macro disable detected from " + source + "; auto-retoggle paused.";
 			case UNKNOWN -> "Manual Nebula combat macro toggle detected from " + source + "; waiting for Nebula status.";
 		};
+		if (result == NebulaMacroController.ManualToggleIntentResult.DISABLING) {
+			cancelLobbyCollisionForManualMacroStop(source);
+		}
 		sendRemoteDebugLog("info", "nebula", message);
+	}
+
+	private void cancelLobbyCollisionForManualMacroStop(String source) {
+		lobbyCollisionController.cancelWorkflow();
+		sendRemoteDebugLog("info", "lobby", "Lobby collision workflow cancelled by manual macro stop from " + source + ".");
 	}
 
 	private boolean recentNebulaStatusResultAvailable(long now) {

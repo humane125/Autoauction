@@ -89,6 +89,25 @@ class LobbyCollisionControllerTest {
 		assertEquals(2, controller.collisionSwitchCount());
 	}
 
+	@Test
+	void manualCancelStopsPendingLobbySwitchWorkflowImmediately() {
+		LobbyCollisionController controller = new LobbyCollisionController();
+		NebulaMacroController macro = enabledMacro();
+		List<String> commands = new ArrayList<>();
+		controller.updateRegisteredAccounts(List.of("FriendEndAlt"));
+
+		controller.tick(snapshot("CurrentAlt", "Private Island", List.of("CurrentAlt"), true, 1_000L), macro, commands::add);
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 1_100L), macro, commands::add);
+		macro.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 1_200L), macro, commands::add);
+
+		controller.cancelWorkflow();
+		controller.tick(snapshot("CurrentAlt", "The End", List.of("FriendEndAlt", "CurrentAlt"), true, 10_000L), macro, commands::add);
+
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+		assertEquals(1, controller.collisionSwitchCount());
+	}
+
 	private static NebulaMacroController enabledMacro() {
 		NebulaMacroController macro = new NebulaMacroController();
 		macro.onChatMessage("NebulaClient > Combat Macro: Enabled");

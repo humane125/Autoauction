@@ -74,6 +74,14 @@ public final class LobbyCollisionController {
 		return collisionSwitchCount;
 	}
 
+	public void cancelWorkflow() {
+		state = State.IDLE;
+		playerAvailableSince = -1L;
+		waitStartedAt = -1L;
+		nextScanAllowedAt = 0L;
+		scanWhenInEnd = false;
+	}
+
 	private void maybeStartSwitch(
 		Snapshot snapshot,
 		NebulaMacroController macroController,
