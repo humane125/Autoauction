@@ -1176,15 +1176,12 @@ public class AutoauctionClient implements ClientModInitializer {
 		ArmorSnapshot chestplate = armor.get(ArmorPiece.CHESTPLATE);
 		ArmorSnapshot leggings = armor.get(ArmorPiece.LEGGINGS);
 		ArmorSnapshot boots = armor.get(ArmorPiece.BOOTS);
-		if (helmet == null || chestplate == null || leggings == null || boots == null) {
-			return Optional.empty();
-		}
 		return Optional.of(new AccountStatsSnapshot(
 			purse.getAsLong(),
-			helmet.kills(),
-			chestplate.kills(),
-			leggings.kills(),
-			boots.kills()
+			helmet == null ? null : helmet.kills(),
+			chestplate == null ? null : chestplate.kills(),
+			leggings == null ? null : leggings.kills(),
+			boots == null ? null : boots.kills()
 		));
 	}
 

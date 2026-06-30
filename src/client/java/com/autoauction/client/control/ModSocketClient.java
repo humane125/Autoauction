@@ -686,10 +686,10 @@ public final class ModSocketClient implements AutoCloseable {
 			return false;
 		}
 		JsonObject kills = new JsonObject();
-		kills.addProperty("helmet", Math.max(0, snapshot.helmetKills()));
-		kills.addProperty("chestplate", Math.max(0, snapshot.chestplateKills()));
-		kills.addProperty("leggings", Math.max(0, snapshot.leggingsKills()));
-		kills.addProperty("boots", Math.max(0, snapshot.bootsKills()));
+		addOptionalStat(kills, "helmet", snapshot.helmetKills());
+		addOptionalStat(kills, "chestplate", snapshot.chestplateKills());
+		addOptionalStat(kills, "leggings", snapshot.leggingsKills());
+		addOptionalStat(kills, "boots", snapshot.bootsKills());
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "account_stats");
 		message.addProperty("purse", Math.max(0L, snapshot.purse()));
@@ -713,6 +713,12 @@ public final class ModSocketClient implements AutoCloseable {
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent summoning_eye_event");
 		return true;
+	}
+
+	private static void addOptionalStat(JsonObject object, String name, Integer value) {
+		if (value != null) {
+			object.addProperty(name, Math.max(0, value));
+		}
 	}
 
 	private synchronized boolean sendTransferMessage(JsonObject message) {

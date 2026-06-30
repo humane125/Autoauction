@@ -496,6 +496,15 @@ class ModSocketClientTest {
 		assertTrue(statsPayload.contains("\"helmet\":25000"));
 		assertFalse(statsPayload.contains("hpx_secret_stats_key"));
 
+		assertTrue(client.sendAccountStats(new AccountStatsSnapshot(12_500_000L, null, null, null, null)));
+		String purseOnlyPayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"purse\":12500000"))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(purseOnlyPayload.contains("\"finalDestinationKills\""));
+		assertFalse(purseOnlyPayload.contains("\"helmet\""));
+		assertFalse(purseOnlyPayload.contains("\"chestplate\""));
+
 		String eyePayload = transport.connection.sentMessages.stream()
 			.filter(message -> message.contains("\"type\":\"summoning_eye_event\""))
 			.findFirst()
