@@ -14,6 +14,7 @@ class AltManagerHandoffClientTest {
 		FakeAccountSwitcher.switchTarget = "";
 		FakeAccountSwitcher.switchCalls = 0;
 		FakeAccountSwitcher.proxyReady = false;
+		FakeAccountSwitcher.policy = Optional.empty();
 	}
 
 	@Test
@@ -42,10 +43,25 @@ class AltManagerHandoffClientTest {
 			client.proxyReadiness("NextPlayer", "next-uuid"));
 	}
 
+	@Test
+	void readsCurrentHandoffPolicyByReflection() {
+		FakeAccountSwitcher.policy = Optional.of(new FakePolicy("MacroOne", "uuid-one", 12_500, "NEXT_ACCOUNT", 0));
+		AltManagerHandoffClient client = new AltManagerHandoffClient(FakeAccountSwitcher.class.getName());
+
+		Optional<HandoffPolicySnapshot> policy = client.currentHandoffPolicy();
+
+		assertTrue(policy.isPresent());
+		assertEquals("MacroOne", policy.get().username());
+		assertEquals("uuid-one", policy.get().uuid());
+		assertEquals(12_500, policy.get().killLimit());
+		assertEquals("NEXT_ACCOUNT", policy.get().action());
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
 		private static boolean proxyReady;
+		private static Optional<FakePolicy> policy = Optional.empty();
 
 		public static Optional<AccountSummary> nextAccount() {
 			return Optional.of(new AccountSummary("NextPlayer", "next-uuid", "MICROSOFT"));
@@ -62,8 +78,15 @@ class AltManagerHandoffClientTest {
 				&& "NextPlayer".equals(username)
 				&& "next-uuid".equals(uuid);
 		}
+
+		public static Optional<FakePolicy> currentHandoffPolicy() {
+			return policy;
+		}
 	}
 
 	public record AccountSummary(String name, String uuid, String type) {
+	}
+
+	public record FakePolicy(String username, String uuid, int killLimit, String action, int stopHours) {
 	}
 }

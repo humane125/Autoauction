@@ -60,9 +60,37 @@ public final class AltManagerHandoffClient {
 		}
 	}
 
+	public Optional<HandoffPolicySnapshot> currentHandoffPolicy() {
+		try {
+			Class<?> switcherClass = Class.forName(accountSwitcherClassName);
+			Method method = switcherClass.getMethod("currentHandoffPolicy");
+			Object value = method.invoke(null);
+			if (!(value instanceof Optional<?> optional) || optional.isEmpty()) {
+				return Optional.empty();
+			}
+			Object policy = optional.get();
+			return Optional.of(new HandoffPolicySnapshot(
+				stringRecordValue(policy, "username"),
+				stringRecordValue(policy, "uuid"),
+				intRecordValue(policy, "killLimit"),
+				stringRecordValue(policy, "action"),
+				intRecordValue(policy, "stopHours")
+			));
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return Optional.empty();
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return Optional.empty();
+		}
+	}
+
 	private static String stringRecordValue(Object value, String methodName) throws ReflectiveOperationException {
 		Object result = value.getClass().getMethod(methodName).invoke(value);
 		return String.valueOf(result == null ? "" : result);
+	}
+
+	private static int intRecordValue(Object value, String methodName) throws ReflectiveOperationException {
+		Object result = value.getClass().getMethod(methodName).invoke(value);
+		return result instanceof Number number ? number.intValue() : 0;
 	}
 
 	public record HandoffResult(boolean switched, String targetUsername, String targetUuid, String message) {
