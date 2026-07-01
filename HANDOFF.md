@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 Branch: `main`
-Latest local commit before this handoff: `c23ece6`
+Latest local commit before this handoff: `1e7de15 Run handoff policies from armor kills`
 
 ## Current Setup
 
@@ -19,6 +19,22 @@ Latest local commit before this handoff: `c23ece6`
 Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs/`, or Minecraft account data.
 
 ## Test Later
+
+Test the new Alt Manager handoff policy with real Hypixel/Nebula instances:
+
+- In Alt Manager, open an account card policy dropdown and set a per-alt kill limit below 25,000.
+- Use `NEXT_ACCOUNT`, run the macro until the lowest equipped Final Destination armor piece reaches that limit, and confirm AutoAuction:
+  - stops Nebula combat macro
+  - force-sends the latest purse/FD kills to the API
+  - asks Alt Manager to switch to the next account
+  - disconnects
+  - waits for proxy readiness
+  - reconnects to Hypixel
+  - starts Nebula combat macro again
+- Use `DISCONNECT_AND_WAIT` and confirm it stops macro, flushes stats, disconnects, and leaves the instance idle.
+- Use `STOP_FOR_HOURS` with a short value for testing and confirm it disconnects, waits, reconnects, and resumes macro.
+- Confirm when armor reaches 25,000 kills the existing armor listing workflow still runs and lists pieces at `24,999,000`.
+- Confirm policy actions do not fire during Bazaar transfer, armor listing, pending account handoff, or other active workflows.
 
 Test account wealth stat reporting with real Hypixel/Nebula instances after the API/dashboard slice is deployed:
 
@@ -52,6 +68,21 @@ Test scenario:
 
 ## Latest Changes
 
+- Added Alt Manager handoff policy execution:
+  - AutoAuction reads `currentHandoffPolicy()` from Alt Manager through the existing reflection bridge.
+  - New `HandoffPolicyWatcher` decides between no action, non-listing handoff, and 25k armor listing.
+  - Below 25,000 kills, reaching the per-alt policy limit starts a non-listing handoff action.
+  - At 25,000 kills, AutoAuction defers to the existing armor listing workflow.
+  - Non-listing actions first ensure Nebula combat macro is off, then force-send latest stats.
+  - `NEXT_ACCOUNT` reuses the existing Alt Manager switch/proxy-ready/reconnect flow.
+  - `STOP_FOR_HOURS` disconnects and keeps an in-memory reconnect timer. If Minecraft exits, that timer is lost for this slice.
+  - `DISCONNECT_AND_WAIT` disconnects and stays idle for manual action.
+  - Client stopping/shutdown now best-effort flushes the latest in-memory account stats.
+- Added `ModSocketClient.forceSendAccountStats(...)` for pre-handoff stat flushes.
+- New/updated tests:
+  - `AltManagerHandoffClientTest.readsCurrentHandoffPolicyByReflection`
+  - `HandoffPolicyWatcherTest`
+  - `ModSocketClientTest.forceSendsAccountStatsPayload`
 - Added macroing state to lightweight account wealth reporting:
   - `AccountStatsSnapshot` now includes `macroing`.
   - AutoAuction marks `macroing` true when `NebulaMacroController` observes the combat macro as on.
@@ -216,12 +247,14 @@ Important AutoAuction events that should emit `client_log`:
 Latest local verification before this handoff:
 
 ```powershell
+.\gradlew.bat --no-daemon test --tests com.autoauction.client.control.ModSocketClientTest --tests com.autoauction.client.handoff.*
 .\gradlew.bat --no-daemon test --tests com.autoauction.client.transfer.EnderChestParkingPlanTest --tests com.autoauction.client.transfer.BazaarTransferWorkflowTest
 .\gradlew.bat --no-daemon test
 .\gradlew.bat --no-daemon build
 ```
 
-All passed. The full build produced `autoauction-1.0.0.jar` and it was copied to all three active Prism instances.
+All passed on 2026-07-01. One parallel `test` invocation failed with a Gradle binary test-results file race while `build` was also running tests in the same repo; rerunning `.\gradlew.bat --no-daemon test` alone passed.
+The full build produced `autoauction-1.0.0.jar`.
 Latest copied jar SHA-256 was `F6C7DFA3383880E229A891C358922A93510AF25707E20F2495C47CBAED8EA8A4`.
 
 ## Build And Copy
