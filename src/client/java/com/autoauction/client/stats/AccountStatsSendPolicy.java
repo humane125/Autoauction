@@ -17,6 +17,9 @@ public final class AccountStatsSendPolicy {
 		if (lastSentSnapshot == null) {
 			return true;
 		}
+		if (snapshot.macroing() != lastSentSnapshot.macroing()) {
+			return true;
+		}
 		return now - lastSentAt >= intervalMs;
 	}
 }

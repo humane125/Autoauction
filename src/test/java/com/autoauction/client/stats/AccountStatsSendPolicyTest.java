@@ -15,4 +15,13 @@ class AccountStatsSendPolicyTest {
 		assertFalse(AccountStatsSendPolicy.shouldSend(changed, previous, 1_000L, 20_000L, 30_000L));
 		assertTrue(AccountStatsSendPolicy.shouldSend(changed, previous, 1_000L, 31_000L, 30_000L));
 	}
+
+	@Test
+	void sendsImmediatelyWhenMacroingStateChanges() {
+		AccountStatsSnapshot notMacroing = new AccountStatsSnapshot(1_000_000L, 10, 10, 10, 10, false);
+		AccountStatsSnapshot macroing = new AccountStatsSnapshot(1_000_000L, 10, 10, 10, 10, true);
+
+		assertTrue(AccountStatsSendPolicy.shouldSend(macroing, notMacroing, 1_000L, 2_000L, 30_000L));
+		assertTrue(AccountStatsSendPolicy.shouldSend(notMacroing, macroing, 1_000L, 2_000L, 30_000L));
+	}
 }

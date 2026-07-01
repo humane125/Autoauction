@@ -693,6 +693,7 @@ public final class ModSocketClient implements AutoCloseable {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "account_stats");
 		message.addProperty("purse", Math.max(0L, snapshot.purse()));
+		message.addProperty("macroing", snapshot.macroing());
 		message.add("finalDestinationKills", kills);
 		connection.send(GSON.toJson(message));
 		log("AutoAuction mod socket sent account_stats");

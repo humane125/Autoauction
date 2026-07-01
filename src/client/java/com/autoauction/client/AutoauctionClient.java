@@ -1182,7 +1182,8 @@ public class AutoauctionClient implements ClientModInitializer {
 			helmet == null ? null : helmet.kills(),
 			chestplate == null ? null : chestplate.kills(),
 			leggings == null ? null : leggings.kills(),
-			boots == null ? null : boots.kills()
+			boots == null ? null : boots.kills(),
+			macroController != null && macroController.observedState() == NebulaMacroController.ObservedState.ON
 		));
 	}
 

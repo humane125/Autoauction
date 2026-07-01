@@ -1,8 +1,8 @@
 # AutoAuction Handoff
 
-Date: 2026-06-30
+Date: 2026-07-01
 Branch: `main`
-Latest local commit before this handoff: `c86cac7 Send lightweight account wealth stats`
+Latest local commit before this handoff: `c23ece6`
 
 ## Current Setup
 
@@ -23,6 +23,8 @@ Do not commit API tokens, Discord webhooks, local Prism configs, generated `logs
 Test account wealth stat reporting with real Hypixel/Nebula instances after the API/dashboard slice is deployed:
 
 - Confirm AutoAuction websocket authenticates and the dashboard account card starts showing wealth stats for that Minecraft account.
+- Toggle Nebula combat macro on and confirm the dashboard status changes to `macroing` within one stats send.
+- Toggle Nebula combat macro off manually and confirm the dashboard leaves `macroing`.
 - Equip all four Final Destination armor pieces and confirm the remote Account Wealth panel shows per-piece kills and lowest-piece kills.
 - Confirm purse updates at least every 30 seconds, and faster when values change.
 - Drop a Summoning Eye and confirm only a tiny `summoning_eye_event` is sent, not full logs/screenshots.
@@ -49,6 +51,14 @@ Test scenario:
 - Confirm the older account already farming in the lobby does not also leave at the same time.
 
 ## Latest Changes
+
+- Added macroing state to lightweight account wealth reporting:
+  - `AccountStatsSnapshot` now includes `macroing`.
+  - AutoAuction marks `macroing` true when `NebulaMacroController` observes the combat macro as on.
+  - `ModSocketClient.sendAccountStats` includes `macroing` in the `account_stats` websocket payload.
+  - `AccountStatsSendPolicy` sends immediately when macroing state changes, instead of waiting for the 30 second heartbeat.
+- Verified locally:
+  - `.\gradlew.bat --no-daemon test`
 
 - Added lightweight account wealth reporting:
   - New `AccountStatsSnapshot` payload sends purse and Final Destination armor kills.

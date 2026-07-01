@@ -484,7 +484,7 @@ class ModSocketClientTest {
 		transport.open();
 		transport.message("{\"type\":\"auth_ok\"}");
 
-		assertTrue(client.sendAccountStats(new AccountStatsSnapshot(12_000_000L, 25_000, 25_001, 25_002, 25_003)));
+		assertTrue(client.sendAccountStats(new AccountStatsSnapshot(12_000_000L, 25_000, 25_001, 25_002, 25_003, true)));
 		assertTrue(client.sendSummoningEyeEvent(new SummoningEyeEvent("sell_order", 1, 1_500_000)));
 
 		String statsPayload = transport.connection.sentMessages.stream()
@@ -492,6 +492,7 @@ class ModSocketClientTest {
 			.findFirst()
 			.orElseThrow();
 		assertTrue(statsPayload.contains("\"purse\":12000000"));
+		assertTrue(statsPayload.contains("\"macroing\":true"));
 		assertTrue(statsPayload.contains("\"finalDestinationKills\""));
 		assertTrue(statsPayload.contains("\"helmet\":25000"));
 		assertFalse(statsPayload.contains("hpx_secret_stats_key"));
@@ -501,6 +502,7 @@ class ModSocketClientTest {
 			.filter(message -> message.contains("\"purse\":12500000"))
 			.findFirst()
 			.orElseThrow();
+		assertTrue(purseOnlyPayload.contains("\"macroing\":false"));
 		assertTrue(purseOnlyPayload.contains("\"finalDestinationKills\""));
 		assertFalse(purseOnlyPayload.contains("\"helmet\""));
 		assertFalse(purseOnlyPayload.contains("\"chestplate\""));
