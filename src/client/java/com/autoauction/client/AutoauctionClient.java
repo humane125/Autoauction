@@ -19,6 +19,8 @@ import com.autoauction.client.domain.ModAccountStatusDetector;
 import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
+import com.autoauction.client.handoff.HandoffPolicySnapshot;
+import com.autoauction.client.handoff.HandoffPolicyWatcher;
 import com.autoauction.client.lobby.LobbyCollisionController;
 import com.autoauction.client.macro.NebulaGuiInputTracker;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
@@ -112,6 +114,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int ACCOUNT_STATS_POLL_TICKS = 20;
 	private static final long ACCOUNT_STATS_SEND_INTERVAL_MS = 30_000L;
 	private static final long NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS = 250L;
+	private static final long HANDOFF_POLICY_RECONNECT_GRACE_MS = 5_000L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
 	private static final int EC_STORAGE_LAST_SLOT = 53;
 	private static final int PLAYER_INVENTORY_FIRST_SLOT = 54;
@@ -135,10 +138,12 @@ public class AutoauctionClient implements ClientModInitializer {
 	private NebulaLatestLogWatcher nebulaLatestLogWatcher;
 	private final NebulaGuiInputTracker nebulaGuiInputTracker = new NebulaGuiInputTracker();
 	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
+	private final HandoffPolicyWatcher handoffPolicyWatcher = new HandoffPolicyWatcher();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
 	private AccountStatsSnapshot lastSentAccountStats;
+	private AccountStatsSnapshot latestAccountStatsSnapshot;
 	private long lastSentAccountStatsAt;
 	private boolean sendingAutoAuctionMacroToggleCommand;
 	private boolean nebulaMacroKeybindWasDown;
@@ -169,6 +174,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	private long lastNebulaMacroStatusResultAt;
 	private int autoRetoggleCount;
 	private PendingHandoff pendingHandoff;
+	private PendingHandoffPolicyAction pendingHandoffPolicyAction;
+	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
+	private String lastHandoffPolicyTriggerKey = "";
 
 	@Override
 	public void onInitializeClient() {
@@ -198,15 +206,18 @@ public class AutoauctionClient implements ClientModInitializer {
 			registerMessageHandlers();
 			registerConnectionStatusHandlers();
 			ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+				forceFlushLatestAccountStats();
 				if (modSocketClient != null) {
 					modSocketClient.close();
 				}
 			});
+			Runtime.getRuntime().addShutdownHook(new Thread(this::forceFlushLatestAccountStats, "AutoAuction Stats Flush"));
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
 				startModSocketIfNeeded(client);
 				reportConnectionStatus(client);
 				pollNebulaLatestLog();
 				handlePendingHandoff(client);
+				handlePendingHandoffPolicyStop(client);
 				if (client.player == null || controller == null || actions == null) {
 					return;
 				}
@@ -246,6 +257,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (tickCounter % ACCOUNT_STATS_POLL_TICKS == 0) {
 					sendAccountStatsIfNeeded(client);
+					handleHandoffPolicy(client);
 				}
 				if (!workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
 					workflowStarted = true;
@@ -572,6 +584,52 @@ public class AutoauctionClient implements ClientModInitializer {
 		notifyInfoAsync("account handoff complete for " + currentUsername + ".");
 		sendRemoteClientLog("info", "Handoff complete, new account is " + currentUsername);
 		pendingHandoff = null;
+	}
+
+	private void handlePendingHandoffPolicyStop(Minecraft client) {
+		PendingHandoffPolicyStop stop = pendingHandoffPolicyStop;
+		if (stop == null || actions == null || macroController == null || controller == null) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		if (!stop.reconnectStarted) {
+			if (now < stop.reconnectAt) {
+				return;
+			}
+			stop.reconnectStarted = true;
+			Autoauction.LOGGER.info("AutoAuction handoff policy stop timer elapsed; reconnecting to Hypixel.");
+			actions.connectToServer(client, "mc.hypixel.net");
+			return;
+		}
+		if (client.player == null || client.getCurrentServer() == null
+			|| !ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+			stop.hypixelReadyAt = 0L;
+			return;
+		}
+		if (stop.hypixelReadyAt == 0L) {
+			stop.hypixelReadyAt = now;
+			return;
+		}
+		if (now - stop.hypixelReadyAt < HANDOFF_POLICY_RECONNECT_GRACE_MS) {
+			return;
+		}
+		NebulaMacroController.EnsureResult macroStart = macroController.ensureOn(
+			command -> runMacroToggleCommand(client, command),
+			now
+		);
+		if (macroStart == NebulaMacroController.EnsureResult.PENDING) {
+			return;
+		}
+		if (macroStart == NebulaMacroController.EnsureResult.FAILED) {
+			notifyIssueAsync("macro enable confirmation timed out after handoff policy stop timer");
+			Autoauction.LOGGER.warn("AutoAuction handoff policy stop failed waiting for Nebula combat macro to enable.");
+			pendingHandoffPolicyStop = null;
+			return;
+		}
+		controller.start();
+		workflowStarted = false;
+		sendRemoteClientLog("info", "Handoff policy stop timer complete; macro resumed.");
+		pendingHandoffPolicyStop = null;
 	}
 
 	private String screenText(Screen screen) {
@@ -1157,6 +1215,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (snapshot.isEmpty()) {
 			return;
 		}
+		latestAccountStatsSnapshot = snapshot.get();
 		long now = System.currentTimeMillis();
 		if (!AccountStatsSendPolicy.shouldSend(snapshot.get(), lastSentAccountStats, lastSentAccountStatsAt, now, ACCOUNT_STATS_SEND_INTERVAL_MS)) {
 			return;
@@ -1165,6 +1224,84 @@ public class AutoauctionClient implements ClientModInitializer {
 			lastSentAccountStats = snapshot.get();
 			lastSentAccountStatsAt = now;
 		}
+	}
+
+	private void forceFlushLatestAccountStats() {
+		if (modSocketClient != null && latestAccountStatsSnapshot != null) {
+			modSocketClient.forceSendAccountStats(latestAccountStatsSnapshot);
+		}
+	}
+
+	private void handleHandoffPolicy(Minecraft client) {
+		if (handoffClient == null || handoffPolicyWatcher == null || latestAccountStatsSnapshot == null || controller == null) {
+			return;
+		}
+		if (pendingHandoffPolicyAction != null) {
+			pendingHandoffPolicyAction.tick(client);
+			return;
+		}
+		if (workflowBusyForHandoffPolicy()) {
+			return;
+		}
+		OptionalInt lowestKills = minimumKnownKills(latestAccountStatsSnapshot);
+		if (lowestKills.isEmpty()) {
+			return;
+		}
+		Optional<HandoffPolicySnapshot> policy = handoffClient.currentHandoffPolicy();
+		if (policy.isEmpty()) {
+			return;
+		}
+		HandoffPolicyWatcher.Decision decision = handoffPolicyWatcher.decide(lowestKills.getAsInt(), policy.get());
+		if (decision != HandoffPolicyWatcher.Decision.NON_LISTING_HANDOFF) {
+			return;
+		}
+		String triggerKey = handoffPolicyTriggerKey(client, policy.get());
+		if (triggerKey.equals(lastHandoffPolicyTriggerKey)) {
+			return;
+		}
+		lastHandoffPolicyTriggerKey = triggerKey;
+		pendingHandoffPolicyAction = new PendingHandoffPolicyAction(policy.get());
+		sendRemoteClientLog(
+			"info",
+			"Handoff policy reached " + policy.get().killLimit() + " FD kills; action=" + policy.get().action()
+		);
+		pendingHandoffPolicyAction.tick(client);
+	}
+
+	private OptionalInt minimumKnownKills(AccountStatsSnapshot snapshot) {
+		if (snapshot.helmetKills() == null || snapshot.chestplateKills() == null
+			|| snapshot.leggingsKills() == null || snapshot.bootsKills() == null) {
+			return OptionalInt.empty();
+		}
+		return OptionalInt.of(Math.min(
+			Math.min(snapshot.helmetKills(), snapshot.chestplateKills()),
+			Math.min(snapshot.leggingsKills(), snapshot.bootsKills())
+		));
+	}
+
+	private boolean workflowBusyForHandoffPolicy() {
+		return realWorkflow != null
+			|| receiverBuyOrderWorkflow != null
+			|| receiverSellOfferWorkflow != null
+			|| senderPrepareTransferWorkflow != null
+			|| senderInstantSellWorkflow != null
+			|| senderInstantBuyWorkflow != null
+			|| senderEnderChestRestoreWorkflow != null
+			|| receiverClaimSellOfferWorkflow != null
+			|| pendingTransferFill != null
+			|| pendingTransferSellFill != null
+			|| transferLoopGoal != null
+			|| pendingHandoff != null
+			|| pendingHandoffPolicyStop != null
+			|| controller.state() != AutomationState.WATCHING_ARMOR;
+	}
+
+	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
+		String currentUsername = client.getUser() == null ? "" : client.getUser().getName();
+		return currentUsername.toLowerCase(Locale.ROOT) + "|"
+			+ policy.uuid().toLowerCase(Locale.ROOT) + "|"
+			+ policy.killLimit() + "|"
+			+ policy.action().toLowerCase(Locale.ROOT);
 	}
 
 	private Optional<AccountStatsSnapshot> currentAccountStatsSnapshot(Minecraft client) {
@@ -3349,6 +3486,86 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.previousUsername = previousUsername;
 			this.targetUsername = targetUsername;
 			this.targetUuid = targetUuid;
+		}
+	}
+
+	private final class PendingHandoffPolicyAction {
+		private final HandoffPolicySnapshot policy;
+		private State state = State.STOP_MACRO;
+
+		private PendingHandoffPolicyAction(HandoffPolicySnapshot policy) {
+			this.policy = policy;
+		}
+
+		private void tick(Minecraft client) {
+			if (macroController == null || actions == null || controller == null) {
+				pendingHandoffPolicyAction = null;
+				return;
+			}
+
+			switch (state) {
+				case STOP_MACRO -> {
+					NebulaMacroController.EnsureResult result = macroController.ensureOff(
+						command -> runMacroToggleCommand(client, command),
+						System.currentTimeMillis()
+					);
+					if (result == NebulaMacroController.EnsureResult.PENDING) {
+						return;
+					}
+					if (result == NebulaMacroController.EnsureResult.FAILED) {
+						notifyIssueAsync("handoff policy macro disable confirmation timed out");
+						sendRemoteClientLog("error", "Handoff policy stopped: macro disable confirmation timed out.");
+						pendingHandoffPolicyAction = null;
+						return;
+					}
+					state = State.APPLY_ACTION;
+				}
+				case APPLY_ACTION -> apply(client);
+			}
+		}
+
+		private void apply(Minecraft client) {
+			forceFlushLatestAccountStats();
+			controller.stop();
+			workflowStarted = false;
+
+			if (policy.nextAccount()) {
+				beginAccountHandoff(client);
+				if (pendingHandoff != null) {
+					actions.disconnect(client, "AutoAuction handoff policy switched accounts.");
+					sendRemoteClientLog("info", "Handoff policy switched to next Alt Manager account.");
+				}
+				pendingHandoffPolicyAction = null;
+				return;
+			}
+
+			if (policy.stopForHours()) {
+				long delayMs = Math.max(0L, policy.stopHours()) * 60L * 60L * 1000L;
+				pendingHandoffPolicyStop = new PendingHandoffPolicyStop(System.currentTimeMillis() + delayMs);
+				actions.disconnect(client, "AutoAuction handoff policy stop timer started.");
+				sendRemoteClientLog("info", "Handoff policy stopped macro for " + policy.stopHours() + " hour(s).");
+				pendingHandoffPolicyAction = null;
+				return;
+			}
+
+			actions.disconnect(client, "AutoAuction handoff policy disconnect-and-wait.");
+			sendRemoteClientLog("info", "Handoff policy disconnected and is waiting for manual action.");
+			pendingHandoffPolicyAction = null;
+		}
+
+		private enum State {
+			STOP_MACRO,
+			APPLY_ACTION
+		}
+	}
+
+	private static final class PendingHandoffPolicyStop {
+		private final long reconnectAt;
+		private boolean reconnectStarted;
+		private long hypixelReadyAt;
+
+		private PendingHandoffPolicyStop(long reconnectAt) {
+			this.reconnectAt = reconnectAt;
 		}
 	}
 

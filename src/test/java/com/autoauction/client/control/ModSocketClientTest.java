@@ -519,6 +519,29 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void forceSendsAccountStatsPayload() {
+		FakeTransport transport = new FakeTransport();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_secret_stats_key");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000);
+
+		client.start("SocketPlayer", "26.1.1");
+		transport.open();
+		transport.message("{\"type\":\"auth_ok\"}");
+
+		AccountStatsSnapshot snapshot = new AccountStatsSnapshot(12_000_000L, 12_500, 12_501, 12_502, 12_503, true);
+		assertTrue(client.forceSendAccountStats(snapshot));
+
+		String statsPayload = transport.connection.sentMessages.stream()
+			.filter(message -> message.contains("\"type\":\"account_stats\""))
+			.findFirst()
+			.orElseThrow();
+		assertTrue(statsPayload.contains("\"purse\":12000000"));
+		assertTrue(statsPayload.contains("\"helmet\":12500"));
+		assertFalse(statsPayload.contains("hpx_secret_stats_key"));
+		client.close();
+	}
+
+	@Test
 	void ignoresRemoteControlPayloadsBeforeAuthOk() {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");

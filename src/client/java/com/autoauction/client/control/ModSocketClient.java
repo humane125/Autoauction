@@ -682,6 +682,14 @@ public final class ModSocketClient implements AutoCloseable {
 	}
 
 	public synchronized boolean sendAccountStats(AccountStatsSnapshot snapshot) {
+		return sendAccountStatsPayload(snapshot);
+	}
+
+	public synchronized boolean forceSendAccountStats(AccountStatsSnapshot snapshot) {
+		return sendAccountStatsPayload(snapshot);
+	}
+
+	private boolean sendAccountStatsPayload(AccountStatsSnapshot snapshot) {
 		if (!authenticated || connection == null || snapshot == null) {
 			return false;
 		}
