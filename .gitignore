@@ -32,6 +32,11 @@ bin/
 
 run/
 
+# local workspace
+
+Autoreconnect/
+logs/
+
 # superpowers
 
 docs/superpowers/
