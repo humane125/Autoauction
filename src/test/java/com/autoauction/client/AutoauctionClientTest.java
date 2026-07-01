@@ -2,7 +2,9 @@ package com.autoauction.client;
 
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
+import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.macro.NebulaMacroController;
+import com.autoauction.client.stats.AccountStatsSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
@@ -77,6 +79,17 @@ class AutoauctionClientTest {
 	@Test
 	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
 		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
+	}
+
+	@Test
+	void handoffPolicyCanRunWhileMacroingEvenWhenArmorWatcherStopped() {
+		AccountStatsSnapshot macroingSnapshot = new AccountStatsSnapshot(1_000_000, 12_500, 12_500, 12_500, 12_500, true);
+		AccountStatsSnapshot idleSnapshot = new AccountStatsSnapshot(1_000_000, 12_500, 12_500, 12_500, 12_500, false);
+
+		assertEquals(true, AutoauctionClient.handoffPolicyCanRun(AutomationState.STOPPED, macroingSnapshot));
+		assertEquals(true, AutoauctionClient.handoffPolicyCanRun(AutomationState.WATCHING_ARMOR, macroingSnapshot));
+		assertEquals(false, AutoauctionClient.handoffPolicyCanRun(AutomationState.STOPPED, idleSnapshot));
+		assertEquals(false, AutoauctionClient.handoffPolicyCanRun(AutomationState.THRESHOLD_REACHED, macroingSnapshot));
 	}
 
 	@Test

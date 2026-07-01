@@ -1293,7 +1293,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| transferLoopGoal != null
 			|| pendingHandoff != null
 			|| pendingHandoffPolicyStop != null
-			|| controller.state() != AutomationState.WATCHING_ARMOR;
+			|| !handoffPolicyCanRun(controller.state(), latestAccountStatsSnapshot);
 	}
 
 	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
@@ -4099,6 +4099,12 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	static int bazaarCloseDelayMs() {
 		return BAZAAR_CLOSE_DELAY_MS;
+	}
+
+	static boolean handoffPolicyCanRun(AutomationState state, AccountStatsSnapshot snapshot) {
+		return snapshot != null
+			&& snapshot.macroing()
+			&& (state == AutomationState.STOPPED || state == AutomationState.WATCHING_ARMOR);
 	}
 
 	static String retoggleStatusMessage(
