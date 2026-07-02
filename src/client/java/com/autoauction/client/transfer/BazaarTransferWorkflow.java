@@ -62,7 +62,9 @@ public final class BazaarTransferWorkflow {
 	}
 
 	public static boolean isOrdersScreen(String title) {
-		return normalized(title).equals("your bazaar orders");
+		String cleanTitle = normalized(title);
+		return cleanTitle.equals("your bazaar orders")
+			|| cleanTitle.equals("co-op bazaar orders");
 	}
 
 	public static boolean isSellOfferPriceScreen(String title) {
