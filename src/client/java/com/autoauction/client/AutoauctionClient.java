@@ -524,6 +524,20 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 
+		if (!pendingHandoff.schedulerMarked) {
+			pendingHandoff.schedulerMarked = true;
+			handoffClient.markScheduleHandoffComplete(pendingHandoff.previousUsername, currentUsername);
+		}
+
+		long scheduleWaitUntil = handoffClient.currentScheduleWaitUntilEpochMs();
+		if (scheduleWaitUntil > System.currentTimeMillis()) {
+			if (!pendingHandoff.waitLogged) {
+				pendingHandoff.waitLogged = true;
+				sendRemoteClientLog("info", "Scheduler wait active before reconnecting " + currentUsername + ".");
+			}
+			return;
+		}
+
 		if (!pendingHandoff.reconnectStarted) {
 			if (handoffClient.proxyReadiness(pendingHandoff.targetUsername, pendingHandoff.targetUuid)
 				!= AltManagerHandoffClient.ProxyReadiness.READY) {
@@ -2089,8 +2103,16 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void beginAccountHandoff(Minecraft client) {
+		beginAccountHandoff(client, "");
+	}
+
+	private void beginAccountHandoff(Minecraft client, HandoffPolicySnapshot policy) {
+		beginAccountHandoff(client, policy == null ? "" : policy.nextTarget());
+	}
+
+	private void beginAccountHandoff(Minecraft client, String preferredTarget) {
 		String previousUsername = client.getUser() == null ? "" : client.getUser().getName();
-		AltManagerHandoffClient.HandoffResult result = handoffClient.switchToNextAccount();
+		AltManagerHandoffClient.HandoffResult result = handoffClient.switchToNextAccount(preferredTarget);
 		if (!result.switched()) {
 			notifyIssueAsync(result.message());
 			Autoauction.LOGGER.warn("AutoAuction account handoff skipped: {}", result.message());
@@ -3481,6 +3503,8 @@ public class AutoauctionClient implements ClientModInitializer {
 		private boolean reconnectStarted;
 		private long reconnectStartedAt;
 		private long hypixelReadyAt;
+		private boolean schedulerMarked;
+		private boolean waitLogged;
 
 		private PendingHandoff(String previousUsername, String targetUsername, String targetUuid) {
 			this.previousUsername = previousUsername;
@@ -3530,7 +3554,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			workflowStarted = false;
 
 			if (policy.nextAccount()) {
-				beginAccountHandoff(client);
+				beginAccountHandoff(client, policy);
 				if (pendingHandoff != null) {
 					actions.disconnect(client, "AutoAuction handoff policy switched accounts.");
 					sendRemoteClientLog("info", "Handoff policy switched to next Alt Manager account.");
@@ -3982,7 +4006,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_DISCONNECT -> {
 					debug(client, "Disconnecting after listing workflow.");
-					beginAccountHandoff(client);
+					String current = currentUsername(client);
+					String scheduledNext = handoffClient.nextScheduledAccount(current);
+					handoffClient.markScheduleListingComplete(current);
+					beginAccountHandoff(client, scheduledNext);
 					actions.disconnect(client, "AutoAuction finished listing.");
 					transition(RealAuctionState.DONE, client);
 					realWorkflow = null;

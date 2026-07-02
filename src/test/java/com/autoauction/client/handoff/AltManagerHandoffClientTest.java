@@ -16,6 +16,10 @@ class AltManagerHandoffClientTest {
 		FakeAccountSwitcher.proxyReady = false;
 		FakeAccountSwitcher.policy = Optional.empty();
 		FakeScheduleBridge.policy = Optional.empty();
+		FakeScheduleBridge.handoffMarked = false;
+		FakeScheduleBridge.listingMarked = false;
+		FakeScheduleBridge.waitUntil = 0L;
+		FakeScheduleBridge.nextScheduledAccount = "";
 	}
 
 	@Test
@@ -29,6 +33,21 @@ class AltManagerHandoffClientTest {
 		assertEquals("next-uuid", result.targetUuid());
 		assertEquals("next-uuid", FakeAccountSwitcher.switchTarget);
 		assertEquals(1, FakeAccountSwitcher.switchCalls);
+	}
+
+	@Test
+	void switchesToSchedulerTargetWhenProvided() {
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		AltManagerHandoffClient.HandoffResult result = client.switchToNextAccount("scheduled-uuid");
+
+		assertTrue(result.switched());
+		assertEquals("ScheduledPlayer", result.targetUsername());
+		assertEquals("scheduled-uuid", result.targetUuid());
+		assertEquals("scheduled-uuid", FakeAccountSwitcher.switchTarget);
 	}
 
 	@Test
@@ -105,6 +124,23 @@ class AltManagerHandoffClientTest {
 		assertEquals(20_000, policy.get().killLimit());
 	}
 
+	@Test
+	void notifiesSchedulerProgressAndReadsWaitUntil() {
+		FakeScheduleBridge.waitUntil = 123_456L;
+		FakeScheduleBridge.nextScheduledAccount = "scheduled-uuid";
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		assertTrue(client.markScheduleHandoffComplete("Old", "ScheduledPlayer"));
+		assertTrue(client.markScheduleListingComplete("ScheduledPlayer"));
+		assertEquals(123_456L, client.currentScheduleWaitUntilEpochMs());
+		assertEquals("scheduled-uuid", client.nextScheduledAccount("Old"));
+		assertTrue(FakeScheduleBridge.handoffMarked);
+		assertTrue(FakeScheduleBridge.listingMarked);
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
@@ -113,6 +149,13 @@ class AltManagerHandoffClientTest {
 
 		public static Optional<AccountSummary> nextAccount() {
 			return Optional.of(new AccountSummary("NextPlayer", "next-uuid", "MICROSOFT"));
+		}
+
+		public static java.util.List<AccountSummary> listAccounts() {
+			return java.util.List.of(
+				new AccountSummary("NextPlayer", "next-uuid", "MICROSOFT"),
+				new AccountSummary("ScheduledPlayer", "scheduled-uuid", "MICROSOFT")
+			);
 		}
 
 		public static boolean switchTo(String uuidOrName) {
@@ -134,9 +177,31 @@ class AltManagerHandoffClientTest {
 
 	public static final class FakeScheduleBridge {
 		private static Optional<FakeSchedulePolicy> policy = Optional.empty();
+		private static boolean handoffMarked;
+		private static boolean listingMarked;
+		private static long waitUntil;
+		private static String nextScheduledAccount = "";
 
 		public static Optional<FakeSchedulePolicy> currentSchedulePolicy() {
 			return policy;
+		}
+
+		public static boolean markScheduleHandoffComplete(String fromUuidOrName, String toUuidOrName) {
+			handoffMarked = "Old".equals(fromUuidOrName) && "ScheduledPlayer".equals(toUuidOrName);
+			return handoffMarked;
+		}
+
+		public static boolean markScheduleListingComplete(String uuidOrName) {
+			listingMarked = "ScheduledPlayer".equals(uuidOrName);
+			return listingMarked;
+		}
+
+		public static long currentScheduleWaitUntilEpochMs() {
+			return waitUntil;
+		}
+
+		public static String nextScheduledAccount(String currentUuidOrName) {
+			return nextScheduledAccount;
 		}
 	}
 

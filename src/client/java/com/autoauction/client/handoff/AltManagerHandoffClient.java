@@ -24,17 +24,23 @@ public final class AltManagerHandoffClient {
 	}
 
 	public HandoffResult switchToNextAccount() {
+		return switchToNextAccount("");
+	}
+
+	public HandoffResult switchToNextAccount(String preferredTarget) {
 		try {
 			Class<?> switcherClass = Class.forName(accountSwitcherClassName);
-			Method nextAccountMethod = switcherClass.getMethod("nextAccount");
 			Method switchToMethod = switcherClass.getMethod("switchTo", String.class);
 
-			Object nextValue = nextAccountMethod.invoke(null);
-			if (!(nextValue instanceof Optional<?> nextAccount) || nextAccount.isEmpty()) {
-				return HandoffResult.notSwitched("Alt Manager has no next account.");
+			Object account = preferredTarget == null || preferredTarget.isBlank()
+				? nextAccount(switcherClass)
+				: accountByTarget(switcherClass, preferredTarget);
+			if (account == null) {
+				return HandoffResult.notSwitched(preferredTarget == null || preferredTarget.isBlank()
+					? "Alt Manager has no next account."
+					: "Alt Manager scheduler target was not found: " + preferredTarget + ".");
 			}
 
-			Object account = nextAccount.get();
 			String username = stringRecordValue(account, "name");
 			String uuid = stringRecordValue(account, "uuid");
 			String switchTarget = uuid.isBlank() ? username : uuid;
@@ -67,6 +73,31 @@ public final class AltManagerHandoffClient {
 		}
 	}
 
+	private Object nextAccount(Class<?> switcherClass) throws ReflectiveOperationException {
+		Method nextAccountMethod = switcherClass.getMethod("nextAccount");
+		Object nextValue = nextAccountMethod.invoke(null);
+		if (!(nextValue instanceof Optional<?> nextAccount) || nextAccount.isEmpty()) {
+			return null;
+		}
+		return nextAccount.get();
+	}
+
+	private Object accountByTarget(Class<?> switcherClass, String preferredTarget) throws ReflectiveOperationException {
+		Method listAccountsMethod = switcherClass.getMethod("listAccounts");
+		Object value = listAccountsMethod.invoke(null);
+		if (!(value instanceof Iterable<?> accounts)) {
+			return null;
+		}
+		for (Object account : accounts) {
+			String username = stringRecordValue(account, "name");
+			String uuid = stringRecordValue(account, "uuid");
+			if (preferredTarget.equalsIgnoreCase(username) || preferredTarget.equalsIgnoreCase(uuid)) {
+				return account;
+			}
+		}
+		return null;
+	}
+
 	public Optional<HandoffPolicySnapshot> currentHandoffPolicy() {
 		Optional<HandoffPolicySnapshot> schedulerPolicy = currentSchedulePolicy();
 		if (schedulerPolicy.isPresent()) {
@@ -88,6 +119,40 @@ public final class AltManagerHandoffClient {
 		}
 	}
 
+	public boolean markScheduleHandoffComplete(String fromUuidOrName, String toUuidOrName) {
+		return booleanScheduleCall("markScheduleHandoffComplete", fromUuidOrName, toUuidOrName);
+	}
+
+	public boolean markScheduleListingComplete(String uuidOrName) {
+		return booleanScheduleCall("markScheduleListingComplete", uuidOrName);
+	}
+
+	public long currentScheduleWaitUntilEpochMs() {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method = bridgeClass.getMethod("currentScheduleWaitUntilEpochMs");
+			Object value = method.invoke(null);
+			return value instanceof Number number ? number.longValue() : 0L;
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return 0L;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return 0L;
+		}
+	}
+
+	public String nextScheduledAccount(String currentUuidOrName) {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method = bridgeClass.getMethod("nextScheduledAccount", String.class);
+			Object value = method.invoke(null, currentUuidOrName);
+			return String.valueOf(value == null ? "" : value);
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return "";
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return "";
+		}
+	}
+
 	private Optional<HandoffPolicySnapshot> currentSchedulePolicy() {
 		try {
 			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
@@ -101,6 +166,28 @@ public final class AltManagerHandoffClient {
 			return Optional.empty();
 		} catch (ReflectiveOperationException | RuntimeException e) {
 			return Optional.empty();
+		}
+	}
+
+	private boolean booleanScheduleCall(String methodName, String... args) {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method;
+			Object value;
+			if (args.length == 1) {
+				method = bridgeClass.getMethod(methodName, String.class);
+				value = method.invoke(null, args[0]);
+			} else if (args.length == 2) {
+				method = bridgeClass.getMethod(methodName, String.class, String.class);
+				value = method.invoke(null, args[0], args[1]);
+			} else {
+				return false;
+			}
+			return value instanceof Boolean bool && bool;
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return false;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return false;
 		}
 	}
 
