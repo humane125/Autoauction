@@ -28,4 +28,23 @@ class HandoffPolicyWatcherTest {
 
 		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(25_000, policy));
 	}
+
+	@Test
+	void finalListingSchedulerPolicyListsAtPolicyLimit() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			30_000,
+			"LIST_ARMOR",
+			0,
+			"FINAL_LISTING",
+			true,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(HandoffPolicyWatcher.Decision.NONE, watcher.decide(29_999, policy));
+		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(30_000, policy));
+	}
 }

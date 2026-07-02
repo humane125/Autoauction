@@ -5,8 +5,16 @@ public record HandoffPolicySnapshot(
 	String uuid,
 	int killLimit,
 	String action,
-	int stopHours
+	int stopHours,
+	String phase,
+	boolean finalListing,
+	String nextTarget,
+	boolean waitAfterHandoff
 ) {
+	public HandoffPolicySnapshot(String username, String uuid, int killLimit, String action, int stopHours) {
+		this(username, uuid, killLimit, action, stopHours, "", false, "", false);
+	}
+
 	public boolean nextAccount() {
 		return "NEXT_ACCOUNT".equalsIgnoreCase(action);
 	}
@@ -17,5 +25,9 @@ public record HandoffPolicySnapshot(
 
 	public boolean disconnectAndWait() {
 		return "DISCONNECT_AND_WAIT".equalsIgnoreCase(action);
+	}
+
+	public boolean listArmor() {
+		return "LIST_ARMOR".equalsIgnoreCase(action);
 	}
 }

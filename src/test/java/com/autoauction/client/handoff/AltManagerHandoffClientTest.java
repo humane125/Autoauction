@@ -15,6 +15,7 @@ class AltManagerHandoffClientTest {
 		FakeAccountSwitcher.switchCalls = 0;
 		FakeAccountSwitcher.proxyReady = false;
 		FakeAccountSwitcher.policy = Optional.empty();
+		FakeScheduleBridge.policy = Optional.empty();
 	}
 
 	@Test
@@ -57,6 +58,53 @@ class AltManagerHandoffClientTest {
 		assertEquals("NEXT_ACCOUNT", policy.get().action());
 	}
 
+	@Test
+	void schedulerPolicyOverridesManualPolicy() {
+		FakeAccountSwitcher.policy = Optional.of(new FakePolicy("Manual", "manual-uuid", 20_000, "NEXT_ACCOUNT", 0));
+		FakeScheduleBridge.policy = Optional.of(new FakeSchedulePolicy(
+			"Scheduled",
+			"scheduler-uuid",
+			12_500,
+			"NEXT_ACCOUNT",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"next-uuid",
+			true
+		));
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		Optional<HandoffPolicySnapshot> policy = client.currentHandoffPolicy();
+
+		assertTrue(policy.isPresent());
+		assertEquals("Scheduled", policy.get().username());
+		assertEquals("scheduler-uuid", policy.get().uuid());
+		assertEquals(12_500, policy.get().killLimit());
+		assertEquals("NEXT_ACCOUNT", policy.get().action());
+		assertEquals("SHORT_ROTATION", policy.get().phase());
+		assertEquals("next-uuid", policy.get().nextTarget());
+		assertTrue(policy.get().waitAfterHandoff());
+	}
+
+	@Test
+	void fallsBackToManualPolicyWhenSchedulerPolicyIsEmpty() {
+		FakeAccountSwitcher.policy = Optional.of(new FakePolicy("Manual", "manual-uuid", 20_000, "NEXT_ACCOUNT", 0));
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		Optional<HandoffPolicySnapshot> policy = client.currentHandoffPolicy();
+
+		assertTrue(policy.isPresent());
+		assertEquals("Manual", policy.get().username());
+		assertEquals("manual-uuid", policy.get().uuid());
+		assertEquals(20_000, policy.get().killLimit());
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
@@ -84,9 +132,30 @@ class AltManagerHandoffClientTest {
 		}
 	}
 
+	public static final class FakeScheduleBridge {
+		private static Optional<FakeSchedulePolicy> policy = Optional.empty();
+
+		public static Optional<FakeSchedulePolicy> currentSchedulePolicy() {
+			return policy;
+		}
+	}
+
 	public record AccountSummary(String name, String uuid, String type) {
 	}
 
 	public record FakePolicy(String username, String uuid, int killLimit, String action, int stopHours) {
+	}
+
+	public record FakeSchedulePolicy(
+		String username,
+		String uuid,
+		int killLimit,
+		String action,
+		int stopHours,
+		String phase,
+		boolean finalListing,
+		String nextAccount,
+		boolean waitAfterHandoff
+	) {
 	}
 }

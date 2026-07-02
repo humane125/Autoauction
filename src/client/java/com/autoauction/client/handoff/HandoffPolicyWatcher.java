@@ -7,6 +7,9 @@ public final class HandoffPolicyWatcher {
 		if (policy == null || lowestFinalDestinationKills < policy.killLimit()) {
 			return Decision.NONE;
 		}
+		if (policy.finalListing() || policy.listArmor()) {
+			return Decision.LIST_ARMOR;
+		}
 		if (lowestFinalDestinationKills >= ARMOR_LISTING_KILL_LIMIT) {
 			return Decision.LIST_ARMOR;
 		}
