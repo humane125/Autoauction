@@ -145,6 +145,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private int nebulaLatestLogPollTicks;
 	private AccountStatsSnapshot lastSentAccountStats;
 	private AccountStatsSnapshot latestAccountStatsSnapshot;
+	private String latestAccountStatsUsername = "";
 	private long lastSentAccountStatsAt;
 	private boolean sendingAutoAuctionMacroToggleCommand;
 	private boolean nebulaMacroKeybindWasDown;
@@ -596,6 +597,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		controller.start();
 		workflowStarted = false;
+		clearAccountStatsCache();
 		notifyInfoAsync("account handoff complete for " + currentUsername + ".");
 		sendRemoteClientLog("info", "Handoff complete, new account is " + currentUsername);
 		pendingHandoff = null;
@@ -1230,7 +1232,13 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (snapshot.isEmpty()) {
 			return;
 		}
+		String username = currentUsername(client);
+		if (!accountStatsBelongToCurrentUser(latestAccountStatsUsername, username)) {
+			lastSentAccountStats = null;
+			lastSentAccountStatsAt = 0L;
+		}
 		latestAccountStatsSnapshot = snapshot.get();
+		latestAccountStatsUsername = username;
 		long now = System.currentTimeMillis();
 		if (!AccountStatsSendPolicy.shouldSend(snapshot.get(), lastSentAccountStats, lastSentAccountStatsAt, now, ACCOUNT_STATS_SEND_INTERVAL_MS)) {
 			return;
@@ -1249,6 +1257,9 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void handleHandoffPolicy(Minecraft client) {
 		if (handoffClient == null || handoffPolicyWatcher == null || latestAccountStatsSnapshot == null || controller == null) {
+			return;
+		}
+		if (!accountStatsBelongToCurrentUser(latestAccountStatsUsername, currentUsername(client))) {
 			return;
 		}
 		if (pendingHandoffPolicyAction != null) {
@@ -1857,6 +1868,17 @@ public class AutoauctionClient implements ClientModInitializer {
 		return !cleanLeft.isBlank() && !cleanRight.isBlank() && cleanLeft.equalsIgnoreCase(cleanRight);
 	}
 
+	static boolean accountStatsBelongToCurrentUser(String statsUsername, String currentUsername) {
+		return sameMinecraftUsername(statsUsername, currentUsername);
+	}
+
+	private void clearAccountStatsCache() {
+		lastSentAccountStats = null;
+		latestAccountStatsSnapshot = null;
+		latestAccountStatsUsername = "";
+		lastSentAccountStatsAt = 0L;
+	}
+
 	private String transferPrepareStopReasonMessage(EnderChestParkingPlan.StopReason reason) {
 		return switch (reason) {
 			case BELOW_STACK -> "safe transfer quantity is below one stack";
@@ -2122,6 +2144,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 
+		clearAccountStatsCache();
 		pendingHandoff = new PendingHandoff(previousUsername, result.targetUsername(), result.targetUuid());
 		Autoauction.LOGGER.info(
 			"AutoAuction account handoff requested: {} -> {} ({})",

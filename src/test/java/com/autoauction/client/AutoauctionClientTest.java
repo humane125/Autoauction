@@ -101,6 +101,14 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void accountStatsPolicyRequiresStatsFromCurrentMinecraftAccount() {
+		assertEquals(true, AutoauctionClient.accountStatsBelongToCurrentUser("MacroOne", "macroone"));
+		assertEquals(false, AutoauctionClient.accountStatsBelongToCurrentUser("MacroOne", "MacroTwo"));
+		assertEquals(false, AutoauctionClient.accountStatsBelongToCurrentUser("", "MacroTwo"));
+		assertEquals(false, AutoauctionClient.accountStatsBelongToCurrentUser("MacroOne", ""));
+	}
+
+	@Test
 	void retoggleStatusShowsCountObservedAndDesiredState() {
 		assertEquals(
 			"AutoAuction retoggle status: count=3, lobbyCollisions=2, observed=OFF, desired=ON.",
