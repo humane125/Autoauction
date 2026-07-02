@@ -20,6 +20,7 @@ import com.autoauction.client.domain.PriceTextFormatter;
 import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
 import com.autoauction.client.handoff.HandoffPolicySnapshot;
+import com.autoauction.client.handoff.HandoffPolicySwitchPreparation;
 import com.autoauction.client.handoff.HandoffPolicyWatcher;
 import com.autoauction.client.lobby.LobbyCollisionController;
 import com.autoauction.client.macro.NebulaGuiInputTracker;
@@ -3516,6 +3517,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final class PendingHandoffPolicyAction {
 		private final HandoffPolicySnapshot policy;
 		private State state = State.STOP_MACRO;
+		private HandoffPolicySwitchPreparation switchPreparation;
 
 		private PendingHandoffPolicyAction(HandoffPolicySnapshot policy) {
 			this.policy = policy;
@@ -3540,6 +3542,19 @@ public class AutoauctionClient implements ClientModInitializer {
 						notifyIssueAsync("handoff policy macro disable confirmation timed out");
 						sendRemoteClientLog("error", "Handoff policy stopped: macro disable confirmation timed out.");
 						pendingHandoffPolicyAction = null;
+						return;
+					}
+					switchPreparation = new HandoffPolicySwitchPreparation(1_500L, islandCommandCooldownDelayMs());
+					state = State.PREPARE_SWITCH;
+				}
+				case PREPARE_SWITCH -> {
+					HandoffPolicySwitchPreparation.Step step = switchPreparation.tick(System.currentTimeMillis());
+					if (step.type() == HandoffPolicySwitchPreparation.Type.WAITING) {
+						return;
+					}
+					if (step.type() == HandoffPolicySwitchPreparation.Type.COMMAND) {
+						actions.sendChatCommand(client, step.command());
+						sendRemoteClientLog("info", "Handoff policy sent " + step.command() + " before switching accounts.");
 						return;
 					}
 					state = State.APPLY_ACTION;
@@ -3579,6 +3594,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private enum State {
 			STOP_MACRO,
+			PREPARE_SWITCH,
 			APPLY_ACTION
 		}
 	}
