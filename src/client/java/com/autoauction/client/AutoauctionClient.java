@@ -254,14 +254,15 @@ public class AutoauctionClient implements ClientModInitializer {
 					receiverClaimSellOfferWorkflow.tick(client);
 				}
 				tickCounter++;
-				if (tickCounter % 10 == 0) {
+				boolean schedulerEnabled = handoffClient != null && handoffClient.currentScheduleEnabled();
+				if (!schedulerEnabled && tickCounter % 10 == 0) {
 					controller.observeArmor(actions.readEquippedFinalDestinationArmor(client));
 				}
 				if (tickCounter % ACCOUNT_STATS_POLL_TICKS == 0) {
 					sendAccountStatsIfNeeded(client);
 					handleHandoffPolicy(client);
 				}
-				if (!workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
+				if (!schedulerEnabled && !workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
 					workflowStarted = true;
 					startWorkflow(client, controller.triggeredArmor());
 				}
@@ -1278,6 +1279,19 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		HandoffPolicyWatcher.Decision decision = handoffPolicyWatcher.decide(lowestKills.getAsInt(), policy.get());
+		if (decision == HandoffPolicyWatcher.Decision.LIST_ARMOR) {
+			EnumMap<ArmorPiece, ArmorSnapshot> armor = actions.readEquippedFinalDestinationArmor(client);
+			if (armor.size() != ArmorPiece.values().length) {
+				return;
+			}
+			workflowStarted = true;
+			startWorkflow(client, armor);
+			sendRemoteClientLog(
+				"info",
+				"Scheduler reached " + policy.get().killLimit() + " FD kills; listing armor."
+			);
+			return;
+		}
 		if (decision != HandoffPolicyWatcher.Decision.NON_LISTING_HANDOFF) {
 			return;
 		}

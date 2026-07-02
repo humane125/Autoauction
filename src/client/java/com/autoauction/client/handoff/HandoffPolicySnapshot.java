@@ -30,4 +30,8 @@ public record HandoffPolicySnapshot(
 	public boolean listArmor() {
 		return "LIST_ARMOR".equalsIgnoreCase(action);
 	}
+
+	public boolean schedulerPolicy() {
+		return phase != null && !phase.isBlank();
+	}
 }

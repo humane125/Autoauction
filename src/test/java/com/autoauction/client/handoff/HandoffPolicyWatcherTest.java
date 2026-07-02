@@ -30,6 +30,24 @@ class HandoffPolicyWatcherTest {
 	}
 
 	@Test
+	void schedulerNextAccountPolicyDoesNotAutoListAtTwentyFiveThousand() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"NEXT_ACCOUNT",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(HandoffPolicyWatcher.Decision.NON_LISTING_HANDOFF, watcher.decide(25_000, policy));
+	}
+
+	@Test
 	void finalListingSchedulerPolicyListsAtPolicyLimit() {
 		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
 		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(

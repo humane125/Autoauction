@@ -153,6 +153,19 @@ public final class AltManagerHandoffClient {
 		}
 	}
 
+	public boolean currentScheduleEnabled() {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method = bridgeClass.getMethod("isScheduleEnabled");
+			Object value = method.invoke(null);
+			return value instanceof Boolean enabled && enabled;
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return false;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return false;
+		}
+	}
+
 	private Optional<HandoffPolicySnapshot> currentSchedulePolicy() {
 		try {
 			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
