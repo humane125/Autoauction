@@ -136,6 +136,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int PLAYER_INVENTORY_LAST_SLOT = 89;
 	private static final int REMOTE_SCREENSHOT_MAX_WIDTH = 1280;
 	private static final int REMOTE_SCREENSHOT_MAX_HEIGHT = 720;
+	private static final float BLACKSMITH_LOOK_SPEED_DEG_PER_SEC = 220.0f;
+	private static final float BLACKSMITH_LOOK_MIN_DURATION_MS = 450.0f;
+	private static final float BLACKSMITH_LOOK_MAX_DURATION_MS = 1_350.0f;
 
 	private static AutoauctionClient instance;
 
@@ -1870,10 +1873,14 @@ public class AutoauctionClient implements ClientModInitializer {
 			return 0;
 		}
 
-		timeBasedRotation.startRotationTo(client, armorStandNpcLookTarget(blacksmith.get()),
-			() -> sendClientFeedback(client, "AutoAuction looked at Blacksmith."));
+		startBlacksmithLook(client, blacksmith.get(), () -> sendClientFeedback(client, "AutoAuction looked at Blacksmith."));
 		sendFeedback(context.getSource(), "AutoAuction looking at Blacksmith.");
 		return 1;
+	}
+
+	private void startBlacksmithLook(Minecraft client, ArmorStand blacksmith, Runnable completionHandler) {
+		timeBasedRotation.startRotationTo(client, armorStandNpcLookTarget(blacksmith), BLACKSMITH_LOOK_SPEED_DEG_PER_SEC,
+			BLACKSMITH_LOOK_MIN_DURATION_MS, BLACKSMITH_LOOK_MAX_DURATION_MS, completionHandler);
 	}
 
 	private Optional<ArmorStand> nearestNamedArmorStand(Minecraft client, String name, double maxDistance) {
@@ -1988,7 +1995,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (routeHadTimeToStart && now - stationarySince >= STATIONARY_REQUIRED_MS) {
 				blacksmithStand = found.get();
 				rotationComplete = false;
-				timeBasedRotation.startRotationTo(client, armorStandNpcLookTarget(blacksmithStand), () -> rotationComplete = true);
+				startBlacksmithLook(client, blacksmithStand, () -> rotationComplete = true);
 				transition(State.LOOK_AT_BLACKSMITH, now);
 				sendClientFeedback(client, "AutoAuction route arrived near Blacksmith; looking at villager.");
 			}

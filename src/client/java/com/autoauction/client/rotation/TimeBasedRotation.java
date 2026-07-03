@@ -132,6 +132,11 @@ public final class TimeBasedRotation {
 	}
 
 	public void startRotation(Minecraft client, float targetYaw, float targetPitch, Runnable completionHandler) {
+		startRotation(client, targetYaw, targetPitch, degreesPerSecond, minDurationMs, maxDurationMs, completionHandler);
+	}
+
+	public void startRotation(Minecraft client, float targetYaw, float targetPitch, float degreesPerSecond,
+			float minDurationMs, float maxDurationMs, Runnable completionHandler) {
 		if (client.player == null) {
 			return;
 		}
@@ -141,7 +146,7 @@ public final class TimeBasedRotation {
 		this.targetPitch = clampPitch(targetPitch);
 		this.totalYawDist = wrappedYawDistance(startYaw, targetYaw);
 		this.totalPitchDist = this.targetPitch - startPitch;
-		this.durationMs = calculateDuration(totalYawDist, totalPitchDist);
+		this.durationMs = calculateDuration(totalYawDist, totalPitchDist, degreesPerSecond, minDurationMs, maxDurationMs);
 		this.startTimeNs = System.nanoTime();
 		this.completionHandler = completionHandler;
 		this.active = true;
@@ -162,6 +167,17 @@ public final class TimeBasedRotation {
 		Vec3 eye = client.player.getEyePosition();
 		Angles angles = getRotationFromPosition(eye.x, eye.y, eye.z, worldPos.x, worldPos.y, worldPos.z);
 		startRotation(client, angles.yaw(), angles.pitch(), completionHandler);
+	}
+
+	public void startRotationTo(Minecraft client, Vec3 worldPos, float degreesPerSecond, float minDurationMs,
+			float maxDurationMs, Runnable completionHandler) {
+		if (client.player == null || worldPos == null) {
+			return;
+		}
+		Vec3 eye = client.player.getEyePosition();
+		Angles angles = getRotationFromPosition(eye.x, eye.y, eye.z, worldPos.x, worldPos.y, worldPos.z);
+		startRotation(client, angles.yaw(), angles.pitch(), degreesPerSecond, minDurationMs, maxDurationMs,
+			completionHandler);
 	}
 
 	public void enableContinuous(Minecraft client) {
@@ -449,10 +465,14 @@ public final class TimeBasedRotation {
 		return current + Math.signum(delta) * maxChange;
 	}
 
-	private float calculateDuration(float yawDist, float pitchDist) {
+	private static float calculateDuration(float yawDist, float pitchDist, float degreesPerSecond, float minDurationMs,
+			float maxDurationMs) {
 		float totalDegrees = (float) Math.sqrt(yawDist * yawDist + pitchDist * pitchDist);
-		float rawMs = totalDegrees / degreesPerSecond * 1000.0f;
-		return clamp(rawMs, minDurationMs, maxDurationMs);
+		float speed = Math.max(10.0f, degreesPerSecond);
+		float min = Math.max(1.0f, minDurationMs);
+		float max = Math.max(min + 1.0f, maxDurationMs);
+		float rawMs = totalDegrees / speed * 1000.0f;
+		return clamp(rawMs, min, max);
 	}
 
 	private static Angles gcdSnap(Minecraft client, float currentYaw, float currentPitch, float newYaw, float newPitch) {
