@@ -71,6 +71,14 @@ public final class ReforgeTargetPlan {
 		return String.join(", ", SWORD_REFORGES);
 	}
 
+	public static List<String> armorReforgeSuggestions() {
+		return ARMOR_REFORGES.stream().map(ReforgeTargetPlan::suggestionText).toList();
+	}
+
+	public static List<String> swordReforgeSuggestions() {
+		return SWORD_REFORGES.stream().map(ReforgeTargetPlan::suggestionText).toList();
+	}
+
 	private static Optional<Plan> armorPlan(String name, String reforge, List<String> baseNames) {
 		String canonical = canonicalReforge(reforge, ARMOR_REFORGES);
 		if (canonical.isBlank()) {
@@ -97,6 +105,10 @@ public final class ReforgeTargetPlan {
 		return String.valueOf(value == null ? "" : value)
 			.toLowerCase(Locale.ROOT)
 			.replaceAll("[^a-z0-9]", "");
+	}
+
+	private static String suggestionText(String value) {
+		return String.valueOf(value == null ? "" : value).toLowerCase(Locale.ROOT);
 	}
 
 	public enum ItemKind {

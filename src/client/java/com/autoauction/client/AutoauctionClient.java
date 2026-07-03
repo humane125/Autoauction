@@ -1648,14 +1648,20 @@ public class AutoauctionClient implements ClientModInitializer {
 			.then(literal("reforge")
 				.then(literal("fd")
 					.then(literal("armor")
-						.then(argument("reforge", StringArgumentType.word()).executes(context ->
+						.then(argument("reforge", StringArgumentType.word())
+							.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.armorReforgeSuggestions()))
+							.executes(context ->
 							armReforge(context.getSource(), "fd armor", StringArgumentType.getString(context, "reforge"))))))
 				.then(literal("glacite")
 					.then(literal("armor")
-						.then(argument("reforge", StringArgumentType.word()).executes(context ->
+						.then(argument("reforge", StringArgumentType.word())
+							.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.armorReforgeSuggestions()))
+							.executes(context ->
 							armReforge(context.getSource(), "glacite armor", StringArgumentType.getString(context, "reforge"))))))
 				.then(literal("voidwalker")
-					.then(argument("reforge", StringArgumentType.word()).executes(context ->
+					.then(argument("reforge", StringArgumentType.word())
+						.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.swordReforgeSuggestions()))
+						.executes(context ->
 						armReforge(context.getSource(), "voidwalker", StringArgumentType.getString(context, "reforge"))))))
 			.then(literal("debug")
 				.executes(context -> {
@@ -1920,6 +1926,10 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private CompletableFuture<Suggestions> suggestTransferItems(SuggestionsBuilder builder) {
 		return suggestStrings(TransferCommandSuggestions.itemNames(), builder);
+	}
+
+	private CompletableFuture<Suggestions> suggestReforges(SuggestionsBuilder builder, List<String> reforges) {
+		return suggestStrings(reforges, builder);
 	}
 
 	private CompletableFuture<Suggestions> suggestStrings(List<String> values, SuggestionsBuilder builder) {

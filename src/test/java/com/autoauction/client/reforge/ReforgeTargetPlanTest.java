@@ -2,6 +2,8 @@ package com.autoauction.client.reforge;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,5 +37,13 @@ class ReforgeTargetPlanTest {
 		assertTrue(ReforgeTargetPlan.itemMatchesPlan("Fabled Voidedge Katana", plan));
 		assertTrue(ReforgeTargetPlan.itemMatchesPlan("Sharp Voidwalker Katana", plan));
 		assertFalse(ReforgeTargetPlan.itemMatchesPlan("Aspect of the End", plan));
+	}
+
+	@Test
+	void exposesLowercaseSuggestionsForCommandAutocomplete() {
+		assertEquals(List.of("clean", "fierce", "heavy", "light", "mythic", "pure", "smart", "titanic", "wise"),
+			ReforgeTargetPlan.armorReforgeSuggestions());
+		assertEquals(List.of("fair", "epic", "fast", "gentle", "heroic", "legendary", "odd", "rich", "sharp", "spicy"),
+			ReforgeTargetPlan.swordReforgeSuggestions());
 	}
 }
