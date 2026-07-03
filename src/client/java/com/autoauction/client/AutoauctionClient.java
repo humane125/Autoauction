@@ -30,6 +30,8 @@ import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.macro.NebulaMacroToggleKey;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
+import com.autoauction.client.reforge.ReforgeTargetPlan;
+import com.autoauction.client.reforge.ReforgeWorkflow;
 import com.autoauction.client.stats.AccountStatsSnapshot;
 import com.autoauction.client.stats.AccountStatsSendPolicy;
 import com.autoauction.client.stats.SummoningEyeEventDetector;
@@ -159,6 +161,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private OptionalInt cachedNebulaMacroConfigKeyCode = OptionalInt.empty();
 	private boolean workflowStarted;
 	private boolean dumpSlotsKeyWasDown;
+	private boolean reforgeKeyWasDown;
 	private boolean emergencyStopKeyWasDown;
 	private long lastCookieBuffAlertAt;
 	private RealAuctionWorkflow realWorkflow;
@@ -170,6 +173,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private SenderEnderChestRestoreWorkflow senderEnderChestRestoreWorkflow;
 	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
 	private FinalDestinationCraftWorkflow finalDestinationCraftWorkflow;
+	private ReforgeTargetPlan.Plan pendingReforgePlan;
+	private ReforgeWorkflow reforgeWorkflow;
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
 	private TransferLoopGoal transferLoopGoal;
@@ -231,6 +236,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
 				handleLobbyCollision(client);
+				handleReforgeHotkey(client);
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
 				if (realWorkflow != null) {
@@ -258,6 +264,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (finalDestinationCraftWorkflow != null) {
 					finalDestinationCraftWorkflow.tick(client);
+				}
+				if (reforgeWorkflow != null) {
+					reforgeWorkflow.tick(client);
 				}
 				tickCounter++;
 				boolean schedulerEnabled = handoffClient != null && handoffClient.currentScheduleEnabled();
@@ -1393,6 +1402,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
+			|| reforgeWorkflow != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null
@@ -1561,6 +1571,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		dumpSlotsKeyWasDown = isDown;
 	}
 
+	private void handleReforgeHotkey(Minecraft client) {
+		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_F7) == GLFW.GLFW_PRESS;
+		if (isDown && !reforgeKeyWasDown) {
+			startPendingReforge(client);
+		}
+		reforgeKeyWasDown = isDown;
+	}
+
 	private void handleEmergencyStopHotkey(Minecraft client) {
 		boolean isDown = GLFW.glfwGetKey(client.getWindow().handle(), GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
 		if (isDown && !emergencyStopKeyWasDown) {
@@ -1627,6 +1645,18 @@ public class AutoauctionClient implements ClientModInitializer {
 				finalDestinationCraftWorkflow.start(client);
 				return 1;
 			}))
+			.then(literal("reforge")
+				.then(literal("fd")
+					.then(literal("armor")
+						.then(argument("reforge", StringArgumentType.word()).executes(context ->
+							armReforge(context.getSource(), "fd armor", StringArgumentType.getString(context, "reforge"))))))
+				.then(literal("glacite")
+					.then(literal("armor")
+						.then(argument("reforge", StringArgumentType.word()).executes(context ->
+							armReforge(context.getSource(), "glacite armor", StringArgumentType.getString(context, "reforge"))))))
+				.then(literal("voidwalker")
+					.then(argument("reforge", StringArgumentType.word()).executes(context ->
+						armReforge(context.getSource(), "voidwalker", StringArgumentType.getString(context, "reforge"))))))
 			.then(literal("debug")
 				.executes(context -> {
 					sendFeedback(context.getSource(), debugStatusMessage());
@@ -1730,6 +1760,53 @@ public class AutoauctionClient implements ClientModInitializer {
 		sendRemoteClientLog("info", message);
 	}
 
+	private int armReforge(FabricClientCommandSource source, String target, String reforge) {
+		Optional<ReforgeTargetPlan.Plan> plan = ReforgeTargetPlan.parse(target, reforge);
+		if (plan.isEmpty()) {
+			sendFeedback(source, "AutoAuction reforge failed. Targets: " + ReforgeTargetPlan.displayTargets()
+				+ ". Armor reforges: " + ReforgeTargetPlan.displayArmorReforges()
+				+ ". Sword reforges: " + ReforgeTargetPlan.displaySwordReforges() + ".");
+			return 0;
+		}
+		if (reforgeWorkflow != null) {
+			sendFeedback(source, "AutoAuction reforge is already running. Press F9 to cancel.");
+			return 0;
+		}
+		pendingReforgePlan = plan.get();
+		sendFeedback(source, "AutoAuction reforge armed for " + plan.get().name() + " -> " + plan.get().reforge()
+			+ ". Open the Reforge Item menu, then press F7.");
+		return 1;
+	}
+
+	private void startPendingReforge(Minecraft client) {
+		if (pendingReforgePlan == null) {
+			return;
+		}
+		if (reforgeWorkflow != null) {
+			sendClientFeedback(client, "AutoAuction reforge is already running.");
+			return;
+		}
+		if (!actions.screenTitleContains(client, "Reforge Item")) {
+			sendClientFeedback(client, "AutoAuction reforge needs the Reforge Item menu open before pressing F7.");
+			return;
+		}
+		ReforgeTargetPlan.Plan plan = pendingReforgePlan;
+		pendingReforgePlan = null;
+		reforgeWorkflow = new ReforgeWorkflow(
+			plan,
+			actions,
+			config.screenTimeoutMs(),
+			message -> sendClientFeedback(client, message),
+			message -> {
+				Autoauction.LOGGER.error("AutoAuction reforge failed: {}", message);
+				sendClientFeedback(client, "AutoAuction reforge failed: " + message);
+				notifyIssueAsync("reforge workflow failed: " + message);
+			},
+			() -> reforgeWorkflow = null
+		);
+		reforgeWorkflow.start(client);
+	}
+
 	private boolean workflowBusyForFinalDestinationCrafting() {
 		return realWorkflow != null
 			|| receiverBuyOrderWorkflow != null
@@ -1740,6 +1817,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
 			|| finalDestinationCraftWorkflow != null
+			|| reforgeWorkflow != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null;
@@ -2224,6 +2302,8 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void cancelAutomation(Minecraft client, String reason) {
 		realWorkflow = null;
+		pendingReforgePlan = null;
+		reforgeWorkflow = null;
 		workflowStarted = false;
 		controller.stop();
 		Autoauction.LOGGER.warn("AutoAuction cancelled: {}", reason);
