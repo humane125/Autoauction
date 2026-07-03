@@ -5,14 +5,16 @@ import net.minecraft.world.phys.Vec3;
 
 public final class SmoothLookController {
 	private static final long DEFAULT_DURATION_MS = 550L;
-	private static final float COMPLETE_THRESHOLD_DEGREES = 0.75f;
+	private static final long SETTLE_DURATION_MS = 160L;
 
 	private boolean active;
+	private boolean settling;
 	private float startYaw;
 	private float startPitch;
 	private float targetYaw;
 	private float targetPitch;
 	private long startedAtMs;
+	private long settleUntilMs;
 	private long durationMs = DEFAULT_DURATION_MS;
 	private Runnable completionHandler;
 
@@ -30,34 +32,46 @@ public final class SmoothLookController {
 		this.durationMs = durationForDistance(distance);
 		this.startedAtMs = System.currentTimeMillis();
 		this.completionHandler = completionHandler;
+		this.settling = false;
 		this.active = true;
 	}
 
 	public void tick(Minecraft client) {
-		if (!active || client.player == null) {
+		if ((!active && !settling) || client.player == null) {
 			return;
 		}
-		long elapsed = System.currentTimeMillis() - startedAtMs;
+		long now = System.currentTimeMillis();
+		if (settling) {
+			applyRotation(client, targetYaw, targetPitch);
+			if (now >= settleUntilMs) {
+				Runnable handler = completionHandler;
+				stop();
+				if (handler != null) {
+					handler.run();
+				}
+			}
+			return;
+		}
+		long elapsed = now - startedAtMs;
 		float progress = durationMs <= 0 ? 1.0f : Math.min(1.0f, elapsed / (float) durationMs);
 		SmoothLookMath.Angles next = interpolate(progress);
 		applyRotation(client, next.yaw(), next.pitch());
-		if (progress >= 1.0f || SmoothLookMath.closeEnough(next.yaw(), next.pitch(), targetYaw, targetPitch, COMPLETE_THRESHOLD_DEGREES)) {
+		if (progress >= 1.0f) {
 			applyRotation(client, targetYaw, targetPitch);
-			Runnable handler = completionHandler;
-			stop();
-			if (handler != null) {
-				handler.run();
-			}
+			active = false;
+			settling = true;
+			settleUntilMs = now + SETTLE_DURATION_MS;
 		}
 	}
 
 	public void stop() {
 		active = false;
+		settling = false;
 		completionHandler = null;
 	}
 
 	public boolean active() {
-		return active;
+		return active || settling;
 	}
 
 	private SmoothLookMath.Angles interpolate(float progress) {
