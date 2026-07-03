@@ -95,6 +95,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
@@ -407,9 +408,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void stopMacroFromRemote(Minecraft client) {
-		macroController.recordManualDisableIntent();
 		cancelLobbyCollisionForManualMacroStop("remote stop macro button");
-		NebulaMacroController.EnsureResult result = macroController.ensureOff(
+		NebulaMacroController.EnsureResult result = requestRemoteMacroStop(
+			macroController,
 			command -> runMacroToggleCommand(client, command),
 			System.currentTimeMillis()
 		);
@@ -4235,6 +4236,14 @@ public class AutoauctionClient implements ClientModInitializer {
 	static boolean remoteActionRequiresContent(String actionType) {
 		String clean = String.valueOf(actionType == null ? "" : actionType).trim().toLowerCase(Locale.ROOT);
 		return List.of("client_command", "server_command", "text_message").contains(clean);
+	}
+
+	static NebulaMacroController.EnsureResult requestRemoteMacroStop(
+		NebulaMacroController controller,
+		Consumer<String> commandSink,
+		long nowMs
+	) {
+		return controller.ensureOff(commandSink, nowMs);
 	}
 
 	static int bazaarCloseDelayMs() {

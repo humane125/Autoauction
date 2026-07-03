@@ -8,6 +8,8 @@ import com.autoauction.client.stats.AccountStatsSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -95,6 +97,19 @@ class AutoauctionClientTest {
 		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("close_instance"));
 		assertEquals(true, AutoauctionClient.remoteActionRequiresContent("server_command"));
 		assertEquals(true, AutoauctionClient.remoteActionRequiresContent("text_message"));
+	}
+
+	@Test
+	void remoteMacroStopSendsToggleWhenMacroIsKnownOn() {
+		NebulaMacroController controller = new NebulaMacroController();
+		controller.onChatMessage("[Nebula] Combat Macro enabled");
+		List<String> commands = new ArrayList<>();
+
+		NebulaMacroController.EnsureResult result = AutoauctionClient.requestRemoteMacroStop(controller, commands::add, 1_000L);
+
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, result);
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+		assertEquals(false, controller.desiredOn());
 	}
 
 	@Test
