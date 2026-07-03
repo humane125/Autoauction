@@ -32,6 +32,7 @@ import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.reforge.ReforgeTargetPlan;
 import com.autoauction.client.reforge.ReforgeWorkflow;
+import com.autoauction.client.rotation.SmoothLookController;
 import com.autoauction.client.stats.AccountStatsSnapshot;
 import com.autoauction.client.stats.AccountStatsSendPolicy;
 import com.autoauction.client.stats.SummoningEyeEventDetector;
@@ -49,7 +50,9 @@ import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
 import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
@@ -80,6 +83,7 @@ import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Field;
@@ -145,6 +149,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
 	private final HandoffPolicyWatcher handoffPolicyWatcher = new HandoffPolicyWatcher();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
+	private final SmoothLookController smoothLookController = new SmoothLookController();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
 	private AccountStatsSnapshot lastSentAccountStats;
@@ -236,6 +241,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
 				handleLobbyCollision(client);
+				smoothLookController.tick(client);
 				handleReforgeHotkey(client);
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
@@ -1663,6 +1669,10 @@ public class AutoauctionClient implements ClientModInitializer {
 						.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.swordReforgeSuggestions()))
 						.executes(context ->
 						armReforge(context.getSource(), "voidwalker", StringArgumentType.getString(context, "reforge"))))))
+			.then(literal("lookat")
+				.then(argument("x", DoubleArgumentType.doubleArg())
+					.then(argument("y", DoubleArgumentType.doubleArg())
+						.then(argument("z", DoubleArgumentType.doubleArg()).executes(this::startSmoothLookCommand)))))
 			.then(literal("debug")
 				.executes(context -> {
 					sendFeedback(context.getSource(), debugStatusMessage());
@@ -1781,6 +1791,17 @@ public class AutoauctionClient implements ClientModInitializer {
 		pendingReforgePlan = plan.get();
 		sendFeedback(source, "AutoAuction reforge armed for " + plan.get().name() + " -> " + plan.get().reforge()
 			+ ". Open the Reforge Item menu, then press F7.");
+		return 1;
+	}
+
+	private int startSmoothLookCommand(CommandContext<FabricClientCommandSource> context) {
+		Minecraft client = context.getSource().getClient();
+		double x = DoubleArgumentType.getDouble(context, "x");
+		double y = DoubleArgumentType.getDouble(context, "y");
+		double z = DoubleArgumentType.getDouble(context, "z");
+		smoothLookController.lookAt(client, new Vec3(x, y, z),
+			() -> sendClientFeedback(client, "AutoAuction smooth look finished."));
+		sendFeedback(context.getSource(), "AutoAuction smooth look started.");
 		return 1;
 	}
 
