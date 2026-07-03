@@ -1114,7 +1114,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		lastNebulaDebugObservedState = observedState;
 		lastNebulaDebugDesiredOn = desiredOn;
-		if (observedState == NebulaMacroController.ObservedState.OFF && !desiredOn) {
+		if (observedState == NebulaMacroController.ObservedState.ON && desiredOn) {
+			sendRemoteDebugLog("info", "nebula",
+				"Nebula combat macro enabled observed; auto-retoggle armed.");
+		} else if (observedState == NebulaMacroController.ObservedState.OFF && !desiredOn) {
 			sendRemoteDebugLog("info", "nebula",
 				"Nebula combat macro disabled observed; auto-retoggle idle because desired state is OFF/manual disable intent.");
 		}

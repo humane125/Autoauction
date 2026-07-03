@@ -14,6 +14,7 @@ public final class NebulaMacroController {
 	private boolean toggleSent;
 	private boolean desiredOn;
 	private boolean manualTogglePending;
+	private boolean manualDisableSuppressed;
 	private long manualToggleStartedAt;
 	private ObservedState manualToggleExpectedState = ObservedState.UNKNOWN;
 
@@ -32,6 +33,9 @@ public final class NebulaMacroController {
 		}
 		observedState = parsedState.get();
 		applyPendingManualToggleResult();
+		if (observedState == ObservedState.ON && !manualDisableSuppressed) {
+			desiredOn = true;
+		}
 		completeOperationIfTargetObserved();
 	}
 
@@ -55,6 +59,7 @@ public final class NebulaMacroController {
 	}
 
 	public EnsureResult requestProgrammaticOn(Consumer<String> commandSink, long nowMs) {
+		manualDisableSuppressed = false;
 		clearManualTogglePending();
 		return ensureOn(commandSink, nowMs);
 	}
@@ -113,12 +118,14 @@ public final class NebulaMacroController {
 			case ON -> {
 				desiredOn = false;
 				observedState = ObservedState.OFF;
+				manualDisableSuppressed = true;
 				startManualTogglePending(nowMs, ObservedState.OFF);
 				yield ManualToggleIntentResult.DISABLING;
 			}
 			case OFF -> {
 				desiredOn = true;
 				observedState = ObservedState.ON;
+				manualDisableSuppressed = false;
 				startManualTogglePending(nowMs, ObservedState.ON);
 				yield ManualToggleIntentResult.ENABLING;
 			}
@@ -136,11 +143,13 @@ public final class NebulaMacroController {
 			case ON -> {
 				observedState = ObservedState.ON;
 				desiredOn = true;
+				manualDisableSuppressed = false;
 				yield ManualToggleIntentResult.ENABLING;
 			}
 			case OFF -> {
 				observedState = ObservedState.OFF;
 				desiredOn = false;
+				manualDisableSuppressed = true;
 				yield ManualToggleIntentResult.DISABLING;
 			}
 			case UNKNOWN -> recordManualToggleIntent(nowMs);
@@ -150,6 +159,7 @@ public final class NebulaMacroController {
 	public void recordManualDisableIntent() {
 		desiredOn = false;
 		observedState = ObservedState.OFF;
+		manualDisableSuppressed = true;
 		clearManualTogglePending();
 		clearOperation();
 	}
@@ -250,9 +260,11 @@ public final class NebulaMacroController {
 		}
 		if (observedState == ObservedState.ON) {
 			desiredOn = true;
+			manualDisableSuppressed = false;
 			clearManualTogglePending();
 		} else if (observedState == ObservedState.OFF) {
 			desiredOn = false;
+			manualDisableSuppressed = true;
 			clearManualTogglePending();
 		}
 	}
