@@ -3,6 +3,7 @@ package com.autoauction.client;
 import com.autoauction.client.domain.ArmorPiece;
 import com.autoauction.client.domain.ArmorSnapshot;
 import com.autoauction.client.automation.AutomationState;
+import com.autoauction.client.handoff.HandoffPolicySnapshot;
 import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.stats.AccountStatsSnapshot;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.EnumMap;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -141,6 +143,52 @@ class AutoauctionClientTest {
 		assertEquals(true, AutoauctionClient.handoffPolicyCanRun(AutomationState.WATCHING_ARMOR, macroingSnapshot));
 		assertEquals(false, AutoauctionClient.handoffPolicyCanRun(AutomationState.STOPPED, idleSnapshot));
 		assertEquals(false, AutoauctionClient.handoffPolicyCanRun(AutomationState.THRESHOLD_REACHED, macroingSnapshot));
+	}
+
+	@Test
+	void automaticArmorWatcherIsDisabledWhenHandoffPolicyExists() {
+		HandoffPolicySnapshot manualPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "DISCONNECT_AND_WAIT", 0);
+		HandoffPolicySnapshot schedulerPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"NEXT_ACCOUNT",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(true, AutoauctionClient.automaticArmorWatcherEnabled(false, Optional.empty()));
+		assertEquals(false, AutoauctionClient.automaticArmorWatcherEnabled(true, Optional.empty()));
+		assertEquals(false, AutoauctionClient.automaticArmorWatcherEnabled(false, Optional.of(manualPolicy)));
+		assertEquals(false, AutoauctionClient.automaticArmorWatcherEnabled(false, Optional.of(schedulerPolicy)));
+	}
+
+	@Test
+	void nonSchedulerPolicyCanApplyAfterAutomaticArmorListing() {
+		HandoffPolicySnapshot disconnectPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "DISCONNECT_AND_WAIT", 0);
+		HandoffPolicySnapshot stopPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "STOP_FOR_HOURS", 2);
+		HandoffPolicySnapshot nextPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "NEXT_ACCOUNT", 0);
+		HandoffPolicySnapshot schedulerListPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"LIST_ARMOR",
+			0,
+			"FINAL_LISTING",
+			true,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(true, AutoauctionClient.shouldApplyPostListingPolicy(disconnectPolicy));
+		assertEquals(true, AutoauctionClient.shouldApplyPostListingPolicy(stopPolicy));
+		assertEquals(true, AutoauctionClient.shouldApplyPostListingPolicy(nextPolicy));
+		assertEquals(false, AutoauctionClient.shouldApplyPostListingPolicy(schedulerListPolicy));
+		assertEquals(disconnectPolicy, AutoauctionClient.postListingPolicy(disconnectPolicy));
+		assertEquals(null, AutoauctionClient.postListingPolicy(schedulerListPolicy));
 	}
 
 	@Test

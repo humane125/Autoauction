@@ -256,14 +256,18 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				tickCounter++;
 				boolean schedulerEnabled = handoffClient != null && handoffClient.currentScheduleEnabled();
-				if (!schedulerEnabled && tickCounter % 10 == 0) {
+				Optional<HandoffPolicySnapshot> currentHandoffPolicy = handoffClient == null
+					? Optional.empty()
+					: handoffClient.currentHandoffPolicy();
+				boolean automaticArmorWatcherEnabled = automaticArmorWatcherEnabled(schedulerEnabled, currentHandoffPolicy);
+				if (automaticArmorWatcherEnabled && tickCounter % 10 == 0) {
 					controller.observeArmor(actions.readEquippedFinalDestinationArmor(client));
 				}
 				if (tickCounter % ACCOUNT_STATS_POLL_TICKS == 0) {
 					sendAccountStatsIfNeeded(client);
-					handleHandoffPolicy(client);
+					handleHandoffPolicy(client, currentHandoffPolicy);
 				}
-				if (!schedulerEnabled && !workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
+				if (automaticArmorWatcherEnabled && !workflowStarted && controller.state() == AutomationState.THRESHOLD_REACHED) {
 					workflowStarted = true;
 					startWorkflow(client, controller.triggeredArmor());
 				}
@@ -1311,7 +1315,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
-	private void handleHandoffPolicy(Minecraft client) {
+	private void handleHandoffPolicy(Minecraft client, Optional<HandoffPolicySnapshot> currentHandoffPolicy) {
 		if (handoffClient == null || handoffPolicyWatcher == null || latestAccountStatsSnapshot == null || controller == null) {
 			return;
 		}
@@ -1329,7 +1333,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (lowestKills.isEmpty()) {
 			return;
 		}
-		Optional<HandoffPolicySnapshot> policy = handoffClient.currentHandoffPolicy();
+		Optional<HandoffPolicySnapshot> policy = currentHandoffPolicy == null ? Optional.empty() : currentHandoffPolicy;
 		if (policy.isEmpty()) {
 			return;
 		}
@@ -1340,10 +1344,11 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			workflowStarted = true;
-			startWorkflow(client, armor);
+			startWorkflow(client, armor, postListingPolicy(policy.get()));
 			sendRemoteClientLog(
 				"info",
-				"Scheduler reached " + policy.get().killLimit() + " FD kills; listing armor."
+				(policy.get().schedulerPolicy() ? "Scheduler" : "Handoff policy")
+					+ " reached " + policy.get().killLimit() + " FD kills; listing armor."
 			);
 			return;
 		}
@@ -2180,17 +2185,25 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor) {
+		startWorkflow(client, armor, null);
+	}
+
+	private void startWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor, HandoffPolicySnapshot postListingPolicy) {
 		if (!config.canRunRealListing()) {
 			notifyIssueAsync("macroStopCommand is not configured");
 			return;
 		}
 
-		startRealWorkflow(client, armor);
+		startRealWorkflow(client, armor, postListingPolicy);
 	}
 
 	private void startRealWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor) {
+		startRealWorkflow(client, armor, null);
+	}
+
+	private void startRealWorkflow(Minecraft client, EnumMap<ArmorPiece, ArmorSnapshot> armor, HandoffPolicySnapshot postListingPolicy) {
 		CompletableFuture<List<PricedArmor>> prices = realListingPrices(armor, defaultInventoryNames(armor));
-		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(armor.values()), prices);
+		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(armor.values()), prices, postListingPolicy);
 		realWorkflow.start(client);
 	}
 
@@ -2223,10 +2236,40 @@ public class AutoauctionClient implements ClientModInitializer {
 		);
 	}
 
+	private boolean applyPostListingPolicy(Minecraft client, HandoffPolicySnapshot policy) {
+		if (!shouldApplyPostListingPolicy(policy)) {
+			return false;
+		}
+		forceFlushLatestAccountStats();
+		controller.stop();
+		workflowStarted = false;
+
+		if (policy.nextAccount()) {
+			beginAccountHandoff(client, policy);
+			if (pendingHandoff != null) {
+				actions.disconnect(client, "AutoAuction listed armor and switched accounts.");
+				sendRemoteClientLog("info", "Listed armor; handoff policy switched to next Alt Manager account.");
+			}
+			return true;
+		}
+
+		if (policy.stopForHours()) {
+			long delayMs = Math.max(0L, policy.stopHours()) * 60L * 60L * 1000L;
+			pendingHandoffPolicyStop = new PendingHandoffPolicyStop(System.currentTimeMillis() + delayMs);
+			actions.disconnect(client, "AutoAuction listed armor and started handoff stop timer.");
+			sendRemoteClientLog("info", "Listed armor; handoff policy stopped macro for " + policy.stopHours() + " hour(s).");
+			return true;
+		}
+
+		actions.disconnect(client, "AutoAuction listed armor and disconnected.");
+		sendRemoteClientLog("info", "Listed armor; handoff policy disconnected and is waiting for manual action.");
+		return true;
+	}
+
 	private void startTestListingWorkflow(Minecraft client, EnumMap<ArmorPiece, String> equippedNames) {
 		EnumMap<ArmorPiece, ArmorSnapshot> fakeArmor = TestArmorSnapshots.finalDestinationSet(config.killThreshold());
 		CompletableFuture<List<PricedArmor>> prices = testListingPrices(fakeArmor, equippedNames);
-		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(fakeArmor.values()), prices);
+		realWorkflow = new RealAuctionWorkflow(new ArrayList<>(fakeArmor.values()), prices, null);
 		realWorkflow.start(client);
 	}
 
@@ -3758,6 +3801,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private final List<ArmorSnapshot> armor;
 		private final CompletableFuture<List<PricedArmor>> pricesFuture;
+		private final HandoffPolicySnapshot postListingPolicy;
 		private List<PricedArmor> pricedArmor = List.of();
 		private int index;
 		private int armorRemoveIndex;
@@ -3766,9 +3810,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		private long nextActionAt;
 		private long stateStartedAt;
 
-		private RealAuctionWorkflow(List<ArmorSnapshot> armor, CompletableFuture<List<PricedArmor>> pricesFuture) {
+		private RealAuctionWorkflow(
+			List<ArmorSnapshot> armor,
+			CompletableFuture<List<PricedArmor>> pricesFuture,
+			HandoffPolicySnapshot postListingPolicy
+		) {
 			this.armor = armor;
 			this.pricesFuture = pricesFuture;
+			this.postListingPolicy = postListingPolicy;
 		}
 
 		private void start(Minecraft client) {
@@ -4114,6 +4163,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_DISCONNECT -> {
 					debug(client, "Disconnecting after listing workflow.");
+					if (applyPostListingPolicy(client, postListingPolicy)) {
+						transition(RealAuctionState.DONE, client);
+						realWorkflow = null;
+						notifyInfoAsync("real auction workflow finished; handoff policy applied after listing.");
+						return;
+					}
 					String current = currentUsername(client);
 					String scheduledNext = handoffClient.nextScheduledAccount(current);
 					handoffClient.markScheduleListingComplete(current);
@@ -4266,6 +4321,18 @@ public class AutoauctionClient implements ClientModInitializer {
 		return snapshot != null
 			&& snapshot.macroing()
 			&& (state == AutomationState.STOPPED || state == AutomationState.WATCHING_ARMOR);
+	}
+
+	static boolean automaticArmorWatcherEnabled(boolean schedulerEnabled, Optional<HandoffPolicySnapshot> currentHandoffPolicy) {
+		return !schedulerEnabled && (currentHandoffPolicy == null || currentHandoffPolicy.isEmpty());
+	}
+
+	static HandoffPolicySnapshot postListingPolicy(HandoffPolicySnapshot policy) {
+		return shouldApplyPostListingPolicy(policy) ? policy : null;
+	}
+
+	static boolean shouldApplyPostListingPolicy(HandoffPolicySnapshot policy) {
+		return policy != null && !policy.schedulerPolicy() && !policy.listArmor();
 	}
 
 	static String retoggleStatusMessage(
