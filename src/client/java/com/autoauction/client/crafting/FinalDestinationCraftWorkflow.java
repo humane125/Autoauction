@@ -10,7 +10,8 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class FinalDestinationCraftWorkflow {
-	private static final int MIN_CLICK_DELAY_MS = 400;
+	private static final int MIN_CLICK_DELAY_MS = 100;
+	private static final int CRAFT_MOVE_DELAY_MS = 150;
 	private static final int WARNING_CONFIRM_DELAY_MS = 6_000;
 	private static final int INSTANT_BUY_CONFIRM_RETRY_DELAY_MS = 1_500;
 	private static final int INSTANT_BUY_CONFIRM_MAX_CLICKS = 3;
@@ -48,6 +49,18 @@ public final class FinalDestinationCraftWorkflow {
 		this.feedback = feedback;
 		this.errorHandler = errorHandler;
 		this.finishHandler = finishHandler;
+	}
+
+	static boolean canReuseCarriedForNextPlacement(FinalDestinationCraftingPlan.Recipe recipe, int currentPlacementIndex) {
+		List<FinalDestinationCraftingPlan.Placement> placements = recipe.placements();
+		if (currentPlacementIndex < 0 || currentPlacementIndex >= placements.size() - 1) {
+			return false;
+		}
+		FinalDestinationCraftingPlan.Placement current = placements.get(currentPlacementIndex);
+		FinalDestinationCraftingPlan.Placement next = placements.get(currentPlacementIndex + 1);
+		return current.count() == 1
+			&& next.count() == 1
+			&& current.ingredient() == next.ingredient();
 	}
 
 	public void start(Minecraft client) {
@@ -184,12 +197,12 @@ public final class FinalDestinationCraftWorkflow {
 		}
 		currentSourceSlot = sourceSlot.get();
 		actions.clickSlot(client, currentSourceSlot);
-		transition(State.VERIFY_PICKED_INGREDIENT, client);
+		transitionCraft(State.VERIFY_PICKED_INGREDIENT, client);
 	}
 
 	private void verifyPickedIngredient(Minecraft client) {
 		if (currentPlacement != null && actions.carriedItemMatches(client, currentPlacement.ingredient().itemName())) {
-			transition(State.PLACE_INGREDIENT, client);
+			transitionCraft(State.PLACE_INGREDIENT, client);
 			return;
 		}
 		timeout("Picked item did not reach cursor.");
@@ -201,7 +214,7 @@ public final class FinalDestinationCraftWorkflow {
 		} else {
 			actions.rightClickSlot(client, currentPlacement.slot());
 		}
-		transition(State.VERIFY_PLACEMENT, client);
+		transitionCraft(State.VERIFY_PLACEMENT, client);
 	}
 
 	private void verifyPlacement(Minecraft client) {
@@ -211,21 +224,29 @@ public final class FinalDestinationCraftWorkflow {
 		}
 		if (actions.carriedItemEmpty(client)) {
 			placementIndex++;
-			transition(State.PICK_INGREDIENT, client);
+			transitionCraft(State.PICK_INGREDIENT, client);
 			return;
 		}
-		transition(State.RETURN_CARRIED, client);
+		ArmorPiece piece = craftOrder.get(pieceIndex);
+		FinalDestinationCraftingPlan.Recipe recipe = FinalDestinationCraftingPlan.recipe(piece);
+		if (canReuseCarriedForNextPlacement(recipe, placementIndex)) {
+			placementIndex++;
+			currentPlacement = recipe.placements().get(placementIndex);
+			transitionCraft(State.PLACE_INGREDIENT, client);
+			return;
+		}
+		transitionCraft(State.RETURN_CARRIED, client);
 	}
 
 	private void returnCarriedIngredient(Minecraft client) {
 		actions.clickSlot(client, currentSourceSlot);
-		transition(State.VERIFY_RETURNED, client);
+		transitionCraft(State.VERIFY_RETURNED, client);
 	}
 
 	private void verifyReturnedIngredient(Minecraft client) {
 		if (actions.carriedItemEmpty(client)) {
 			placementIndex++;
-			transition(State.PICK_INGREDIENT, client);
+			transitionCraft(State.PICK_INGREDIENT, client);
 			return;
 		}
 		timeout("Cursor still holds " + currentPlacement.ingredient().itemName() + " after returning remainder to inventory.");
@@ -239,7 +260,7 @@ public final class FinalDestinationCraftWorkflow {
 				return;
 			}
 		}
-		transition(State.TAKE_OUTPUT, client);
+		transitionCraft(State.TAKE_OUTPUT, client);
 	}
 
 	private void takeOutput(Minecraft client) {
@@ -252,13 +273,13 @@ public final class FinalDestinationCraftWorkflow {
 		currentOutputSlot = emptySlot.get();
 		outputCountBeforeTake = actions.countInventoryItemsByName(client, piece.baseName());
 		actions.clickSlot(client, FinalDestinationCraftingPlan.OUTPUT_SLOT);
-		transition(State.VERIFY_OUTPUT_TAKEN, client);
+		transitionCraft(State.VERIFY_OUTPUT_TAKEN, client);
 	}
 
 	private void verifyOutputTaken(Minecraft client) {
 		ArmorPiece piece = craftOrder.get(pieceIndex);
 		if (actions.carriedItemMatches(client, piece.baseName())) {
-			transition(State.PLACE_OUTPUT, client);
+			transitionCraft(State.PLACE_OUTPUT, client);
 			return;
 		}
 		if (actions.countInventoryItemsByName(client, piece.baseName()) > outputCountBeforeTake) {
@@ -270,7 +291,7 @@ public final class FinalDestinationCraftWorkflow {
 
 	private void placeOutput(Minecraft client) {
 		actions.clickSlot(client, currentOutputSlot);
-		transition(State.VERIFY_OUTPUT_PLACED, client);
+		transitionCraft(State.VERIFY_OUTPUT_PLACED, client);
 	}
 
 	private void verifyOutputPlaced(Minecraft client) {
@@ -288,7 +309,7 @@ public final class FinalDestinationCraftWorkflow {
 		currentPlacement = null;
 		currentSourceSlot = -1;
 		currentOutputSlot = -1;
-		transition(State.START_PIECE, client);
+		transitionCraft(State.START_PIECE, client);
 	}
 
 	private void transition(State next, Minecraft client) {
@@ -299,6 +320,10 @@ public final class FinalDestinationCraftWorkflow {
 		state = next;
 		stateStartedAt = System.currentTimeMillis();
 		nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
+	}
+
+	private void transitionCraft(State next, Minecraft client) {
+		transition(next, client, CRAFT_MOVE_DELAY_MS);
 	}
 
 	private void timeout(String message) {
