@@ -40,15 +40,9 @@ public final class SmoothLookController {
 		long elapsed = System.currentTimeMillis() - startedAtMs;
 		float progress = durationMs <= 0 ? 1.0f : Math.min(1.0f, elapsed / (float) durationMs);
 		SmoothLookMath.Angles next = interpolate(progress);
-		client.player.setYRot(next.yaw());
-		client.player.setXRot(next.pitch());
-		client.player.yRotO = next.yaw();
-		client.player.xRotO = next.pitch();
+		applyRotation(client, next.yaw(), next.pitch());
 		if (progress >= 1.0f || SmoothLookMath.closeEnough(next.yaw(), next.pitch(), targetYaw, targetPitch, COMPLETE_THRESHOLD_DEGREES)) {
-			client.player.setYRot(targetYaw);
-			client.player.setXRot(targetPitch);
-			client.player.yRotO = targetYaw;
-			client.player.xRotO = targetPitch;
+			applyRotation(client, targetYaw, targetPitch);
 			Runnable handler = completionHandler;
 			stop();
 			if (handler != null) {
@@ -71,6 +65,11 @@ public final class SmoothLookController {
 		float yaw = startYaw + SmoothLookMath.wrapDegrees(targetYaw - startYaw) * eased;
 		float pitch = SmoothLookMath.clampPitch(startPitch + (targetPitch - startPitch) * eased);
 		return new SmoothLookMath.Angles(yaw, pitch);
+	}
+
+	private void applyRotation(Minecraft client, float yaw, float pitch) {
+		client.player.setYRot(yaw);
+		client.player.setXRot(pitch);
 	}
 
 	private long durationForDistance(float degrees) {
