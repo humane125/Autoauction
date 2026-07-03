@@ -360,6 +360,10 @@ public final class MinecraftGameActions {
 		ConnectScreen.startConnecting(parent, client, ServerAddress.parseString(address), server, false, null);
 	}
 
+	public void closeInstance(Minecraft client) {
+		client.stop();
+	}
+
 	public List<String> describeOpenContainerSlots(Minecraft client) {
 		List<String> lines = new ArrayList<>();
 		if (client.player == null) {

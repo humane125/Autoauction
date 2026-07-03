@@ -361,19 +361,28 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void handleRemoteActionRequest(ModSocketClient.RemoteAction request) {
 		Minecraft client = Minecraft.getInstance();
 		client.execute(() -> {
-			if (modSocketClient == null || actions == null || client.player == null) {
+			String actionType = String.valueOf(request.actionType() == null ? "" : request.actionType()).trim().toLowerCase(Locale.ROOT);
+			if (modSocketClient == null || actions == null) {
+				sendRemoteClientLog("warn", "Remote action skipped: AutoAuction controls are not ready");
+				return;
+			}
+			if (remoteActionRequiresLoadedPlayer(actionType) && client.player == null) {
 				sendRemoteClientLog("warn", "Remote action skipped: Minecraft player is not ready");
 				return;
 			}
-			String actionType = String.valueOf(request.actionType() == null ? "" : request.actionType()).trim().toLowerCase(Locale.ROOT);
 			String content = String.valueOf(request.content() == null ? "" : request.content()).trim();
-			if (content.isBlank()) {
+			if (remoteActionRequiresContent(actionType) && content.isBlank()) {
 				sendRemoteClientLog("warn", "Remote action skipped: empty message");
 				return;
 			}
 
 			try {
 				switch (actionType) {
+					case "macro_start" -> startMacroFromRemote(client);
+					case "macro_stop" -> stopMacroFromRemote(client);
+					case "disconnect_server" -> disconnectServerFromRemote(client);
+					case "reconnect_hypixel" -> reconnectHypixelFromRemote(client);
+					case "close_instance" -> closeInstanceFromRemote(client);
 					case "client_command" -> sendRemoteClientCommand(client, content);
 					case "server_command" -> sendRemoteServerCommand(client, content);
 					case "text_message" -> {
@@ -387,6 +396,47 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendRemoteClientLog("error", "Remote action failed: " + error.getMessage());
 			}
 		});
+	}
+
+	private void startMacroFromRemote(Minecraft client) {
+		NebulaMacroController.EnsureResult result = macroController.ensureOn(
+			command -> runMacroToggleCommand(client, command),
+			System.currentTimeMillis()
+		);
+		sendRemoteClientLog("info", "Remote macro start requested: " + remoteMacroResultMessage(result));
+	}
+
+	private void stopMacroFromRemote(Minecraft client) {
+		macroController.recordManualDisableIntent();
+		cancelLobbyCollisionForManualMacroStop("remote stop macro button");
+		NebulaMacroController.EnsureResult result = macroController.ensureOff(
+			command -> runMacroToggleCommand(client, command),
+			System.currentTimeMillis()
+		);
+		sendRemoteClientLog("info", "Remote macro stop requested: " + remoteMacroResultMessage(result));
+	}
+
+	private void disconnectServerFromRemote(Minecraft client) {
+		actions.disconnect(client, "AutoAuction remote disconnect requested.");
+		sendRemoteClientLog("info", "Remote server disconnect requested.");
+	}
+
+	private void reconnectHypixelFromRemote(Minecraft client) {
+		actions.connectToServer(client, "mc.hypixel.net");
+		sendRemoteClientLog("info", "Remote Hypixel reconnect requested.");
+	}
+
+	private void closeInstanceFromRemote(Minecraft client) {
+		sendRemoteClientLog("warn", "Remote close instance requested.");
+		actions.closeInstance(client);
+	}
+
+	private String remoteMacroResultMessage(NebulaMacroController.EnsureResult result) {
+		return switch (result) {
+			case COMPLETE -> "already complete";
+			case PENDING -> "toggle sent or waiting for Nebula confirmation";
+			case FAILED -> "Nebula confirmation timed out";
+		};
 	}
 
 	private void handleRegisteredAccounts(List<ModSocketClient.RegisteredAccount> accounts) {
@@ -4175,6 +4225,16 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	static int islandCommandCooldownDelayMs() {
 		return ISLAND_COMMAND_COOLDOWN_DELAY_MS;
+	}
+
+	static boolean remoteActionRequiresLoadedPlayer(String actionType) {
+		String clean = String.valueOf(actionType == null ? "" : actionType).trim().toLowerCase(Locale.ROOT);
+		return !List.of("reconnect_hypixel", "close_instance").contains(clean);
+	}
+
+	static boolean remoteActionRequiresContent(String actionType) {
+		String clean = String.valueOf(actionType == null ? "" : actionType).trim().toLowerCase(Locale.ROOT);
+		return List.of("client_command", "server_command", "text_message").contains(clean);
 	}
 
 	static int bazaarCloseDelayMs() {

@@ -77,6 +77,27 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void remoteInstanceActionsDoNotRequireLoadedPlayer() {
+		assertEquals(false, AutoauctionClient.remoteActionRequiresLoadedPlayer("reconnect_hypixel"));
+		assertEquals(false, AutoauctionClient.remoteActionRequiresLoadedPlayer("close_instance"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresLoadedPlayer("macro_start"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresLoadedPlayer("macro_stop"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresLoadedPlayer("disconnect_server"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresLoadedPlayer("client_command"));
+	}
+
+	@Test
+	void remoteButtonActionsDoNotRequireContent() {
+		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("macro_start"));
+		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("macro_stop"));
+		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("disconnect_server"));
+		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("reconnect_hypixel"));
+		assertEquals(false, AutoauctionClient.remoteActionRequiresContent("close_instance"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresContent("server_command"));
+		assertEquals(true, AutoauctionClient.remoteActionRequiresContent("text_message"));
+	}
+
+	@Test
 	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
 		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
 	}
