@@ -7,6 +7,7 @@ import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.config.AutoAuctionConfig;
 import com.autoauction.client.config.AutoAuctionConfigStore;
 import com.autoauction.client.control.ModSocketClient;
+import com.autoauction.client.crafting.FinalDestinationCraftWorkflow;
 import com.autoauction.client.debug.SkyBlockIslandGuard;
 import com.autoauction.client.debug.SkyBlockStatus;
 import com.autoauction.client.debug.StatusDumpFormatter;
@@ -168,6 +169,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private SenderInstantBuyWorkflow senderInstantBuyWorkflow;
 	private SenderEnderChestRestoreWorkflow senderEnderChestRestoreWorkflow;
 	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
+	private FinalDestinationCraftWorkflow finalDestinationCraftWorkflow;
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
 	private TransferLoopGoal transferLoopGoal;
@@ -253,6 +255,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (receiverClaimSellOfferWorkflow != null) {
 					receiverClaimSellOfferWorkflow.tick(client);
+				}
+				if (finalDestinationCraftWorkflow != null) {
+					finalDestinationCraftWorkflow.tick(client);
 				}
 				tickCounter++;
 				boolean schedulerEnabled = handoffClient != null && handoffClient.currentScheduleEnabled();
@@ -1601,6 +1606,27 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				return 1;
 			}))
+			.then(literal("craftfd").executes(context -> {
+				Minecraft client = context.getSource().getClient();
+				if (workflowBusyForFinalDestinationCrafting()) {
+					sendFeedback(context.getSource(), "AutoAuction FD crafter cannot start while another workflow is running.");
+					return 0;
+				}
+				finalDestinationCraftWorkflow = new FinalDestinationCraftWorkflow(
+					actions,
+					config.clickDelayMs(),
+					config.screenTimeoutMs(),
+					message -> sendClientFeedback(client, message),
+					message -> {
+						Autoauction.LOGGER.error("AutoAuction FD crafter failed: {}", message);
+						sendClientFeedback(client, "AutoAuction FD crafter failed: " + message);
+						notifyIssueAsync("FD crafter failed: " + message);
+					},
+					() -> finalDestinationCraftWorkflow = null
+				);
+				finalDestinationCraftWorkflow.start(client);
+				return 1;
+			}))
 			.then(literal("debug")
 				.executes(context -> {
 					sendFeedback(context.getSource(), debugStatusMessage());
@@ -1694,6 +1720,29 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (client.player != null) {
 			client.player.sendSystemMessage(Component.literal(message));
 		}
+	}
+
+	private void sendClientFeedback(Minecraft client, String message) {
+		Autoauction.LOGGER.info(message);
+		if (client.player != null) {
+			client.player.sendSystemMessage(Component.literal(message));
+		}
+		sendRemoteClientLog("info", message);
+	}
+
+	private boolean workflowBusyForFinalDestinationCrafting() {
+		return realWorkflow != null
+			|| receiverBuyOrderWorkflow != null
+			|| receiverSellOfferWorkflow != null
+			|| senderPrepareTransferWorkflow != null
+			|| senderInstantSellWorkflow != null
+			|| senderInstantBuyWorkflow != null
+			|| senderEnderChestRestoreWorkflow != null
+			|| receiverClaimSellOfferWorkflow != null
+			|| finalDestinationCraftWorkflow != null
+			|| pendingTransferFill != null
+			|| pendingTransferSellFill != null
+			|| transferLoopGoal != null;
 	}
 
 	private LiteralArgumentBuilder<FabricClientCommandSource> moneyTransferCommand() {

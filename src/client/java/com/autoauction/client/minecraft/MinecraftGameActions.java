@@ -184,6 +184,14 @@ public final class MinecraftGameActions {
 		client.gameMode.handleContainerInput(client.player.containerMenu.containerId, handlerSlot, 0, ContainerInput.PICKUP, client.player);
 	}
 
+	public void rightClickSlot(Minecraft client, int handlerSlot) {
+		if (client.player == null || client.gameMode == null) {
+			return;
+		}
+
+		client.gameMode.handleContainerInput(client.player.containerMenu.containerId, handlerSlot, 1, ContainerInput.PICKUP, client.player);
+	}
+
 	public void quickMoveSlot(Minecraft client, int handlerSlot) {
 		if (client.player == null || client.gameMode == null) {
 			return;
@@ -236,6 +244,67 @@ public final class MinecraftGameActions {
 		return Optional.of(stack.getHoverName().getString());
 	}
 
+	public int itemCountAt(Minecraft client, int handlerSlot) {
+		if (client.player == null || handlerSlot < 0 || handlerSlot >= client.player.containerMenu.slots.size()) {
+			return 0;
+		}
+
+		return client.player.containerMenu.slots.get(handlerSlot).getItem().getCount();
+	}
+
+	public boolean slotContainsAtLeast(Minecraft client, int handlerSlot, String itemNamePart, int minimumCount) {
+		if (client.player == null || handlerSlot < 0 || handlerSlot >= client.player.containerMenu.slots.size()) {
+			return false;
+		}
+
+		ItemStack stack = client.player.containerMenu.slots.get(handlerSlot).getItem();
+		return !stack.isEmpty()
+			&& stack.getCount() >= minimumCount
+			&& itemNameMatches(stack.getHoverName().getString(), itemNamePart);
+	}
+
+	public boolean carriedItemMatches(Minecraft client, String itemNamePart) {
+		if (client.player == null) {
+			return false;
+		}
+
+		ItemStack carried = client.player.containerMenu.getCarried();
+		return !carried.isEmpty() && itemNameMatches(carried.getHoverName().getString(), itemNamePart);
+	}
+
+	public boolean carriedItemEmpty(Minecraft client) {
+		return client.player == null || client.player.containerMenu.getCarried().isEmpty();
+	}
+
+	public Optional<Integer> findInventoryHandlerSlotByItemName(Minecraft client, String itemNamePart, int minimumCount) {
+		if (client.player == null) {
+			return Optional.empty();
+		}
+
+		for (int handlerSlot : playerInventoryHandlerSlots(client)) {
+			ItemStack stack = client.player.containerMenu.slots.get(handlerSlot).getItem();
+			if (!stack.isEmpty()
+				&& stack.getCount() >= minimumCount
+				&& itemNameMatches(stack.getHoverName().getString(), itemNamePart)) {
+				return Optional.of(handlerSlot);
+			}
+		}
+		return Optional.empty();
+	}
+
+	public Optional<Integer> findEmptyInventoryHandlerSlot(Minecraft client) {
+		if (client.player == null) {
+			return Optional.empty();
+		}
+
+		for (int handlerSlot : playerInventoryHandlerSlots(client)) {
+			if (client.player.containerMenu.slots.get(handlerSlot).getItem().isEmpty()) {
+				return Optional.of(handlerSlot);
+			}
+		}
+		return Optional.empty();
+	}
+
 	public Optional<Integer> findHandlerSlotByItemName(Minecraft client, String itemNamePart) {
 		return findHandlerSlotByItemNameMatching(client, itemName -> itemNameMatches(itemName, itemNamePart));
 	}
@@ -285,6 +354,20 @@ public final class MinecraftGameActions {
 			}
 		}
 		return Optional.empty();
+	}
+
+	private List<Integer> playerInventoryHandlerSlots(Minecraft client) {
+		List<Integer> slots = new ArrayList<>();
+		if (client.player == null) {
+			return slots;
+		}
+		for (int handlerSlot = 0; handlerSlot < client.player.containerMenu.slots.size(); handlerSlot++) {
+			Slot slot = client.player.containerMenu.slots.get(handlerSlot);
+			if (slot.container == client.player.getInventory()) {
+				slots.add(handlerSlot);
+			}
+		}
+		return slots;
 	}
 
 	static boolean isBazaarTitle(String title) {
