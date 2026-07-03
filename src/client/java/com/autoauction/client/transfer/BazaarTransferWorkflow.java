@@ -53,6 +53,9 @@ public final class BazaarTransferWorkflow {
 
 	public static boolean isInstantBuyAmountScreen(String title) {
 		String cleanTitle = normalized(title);
+		if (!cleanTitle.equals("confirm instant buy") && cleanTitle.contains("➜ insta")) {
+			return true;
+		}
 		return !cleanTitle.equals("confirm instant buy")
 			&& (cleanTitle.contains("instant buy") || cleanTitle.contains("➜ instan") || cleanTitle.contains("âžœ instan"));
 	}

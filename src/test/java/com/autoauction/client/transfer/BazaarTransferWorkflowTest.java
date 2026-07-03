@@ -38,6 +38,7 @@ class BazaarTransferWorkflowTest {
 		assertTrue(BazaarTransferWorkflow.isInstantSellWarningScreen("Confirm"));
 		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instant Buy"));
 		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Magma Cream Distillate \u279c Instan"));
+		assertTrue(BazaarTransferWorkflow.isInstantBuyAmountScreen("Enchanted Redstone Dust \u279c Insta"));
 		assertTrue(BazaarTransferWorkflow.isConfirmInstantBuyScreen("Confirm Instant Buy"));
 		assertTrue(BazaarTransferWorkflow.isOrdersScreen("Your Bazaar Orders"));
 		assertTrue(BazaarTransferWorkflow.isOrdersScreen("Co-op Bazaar Orders"));
