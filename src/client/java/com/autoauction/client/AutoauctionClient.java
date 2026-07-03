@@ -78,13 +78,16 @@ import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
@@ -184,6 +187,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
 	private FinalDestinationCraftWorkflow finalDestinationCraftWorkflow;
 	private ReforgeTargetPlan.Plan pendingReforgePlan;
+	private RouteReforgeWorkflow routeReforgeWorkflow;
 	private ReforgeWorkflow reforgeWorkflow;
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
@@ -275,6 +279,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (finalDestinationCraftWorkflow != null) {
 					finalDestinationCraftWorkflow.tick(client);
+				}
+				if (routeReforgeWorkflow != null) {
+					routeReforgeWorkflow.tick(client);
 				}
 				if (reforgeWorkflow != null) {
 					reforgeWorkflow.tick(client);
@@ -1419,6 +1426,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
+			|| routeReforgeWorkflow != null
 			|| reforgeWorkflow != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
@@ -1663,6 +1671,24 @@ public class AutoauctionClient implements ClientModInitializer {
 				return 1;
 			}))
 			.then(literal("reforge")
+				.then(literal("blacksmith")
+					.then(literal("fd")
+						.then(literal("armor")
+							.then(argument("reforge", StringArgumentType.word())
+								.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.armorReforgeSuggestions()))
+								.executes(context ->
+								routeReforge(context.getSource(), "fd armor", StringArgumentType.getString(context, "reforge"))))))
+					.then(literal("glacite")
+						.then(literal("armor")
+							.then(argument("reforge", StringArgumentType.word())
+								.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.armorReforgeSuggestions()))
+								.executes(context ->
+								routeReforge(context.getSource(), "glacite armor", StringArgumentType.getString(context, "reforge"))))))
+					.then(literal("voidwalker")
+						.then(argument("reforge", StringArgumentType.word())
+							.suggests((context, builder) -> suggestReforges(builder, ReforgeTargetPlan.swordReforgeSuggestions()))
+							.executes(context ->
+							routeReforge(context.getSource(), "voidwalker", StringArgumentType.getString(context, "reforge"))))))
 				.then(literal("fd")
 					.then(literal("armor")
 						.then(argument("reforge", StringArgumentType.word())
@@ -1806,6 +1832,25 @@ public class AutoauctionClient implements ClientModInitializer {
 		return 1;
 	}
 
+	private int routeReforge(FabricClientCommandSource source, String target, String reforge) {
+		Optional<ReforgeTargetPlan.Plan> plan = ReforgeTargetPlan.parse(target, reforge);
+		if (plan.isEmpty()) {
+			sendFeedback(source, "AutoAuction route reforge failed. Targets: " + ReforgeTargetPlan.displayTargets()
+				+ ". Armor reforges: " + ReforgeTargetPlan.displayArmorReforges()
+				+ ". Sword reforges: " + ReforgeTargetPlan.displaySwordReforges() + ".");
+			return 0;
+		}
+		if (pendingReforgePlan != null || workflowBusyForFinalDestinationCrafting()) {
+			sendFeedback(source, "AutoAuction cannot start route reforge while another workflow is running. Press F9 to cancel.");
+			return 0;
+		}
+		Minecraft client = source.getClient();
+		routeReforgeWorkflow = new RouteReforgeWorkflow(plan.get());
+		routeReforgeWorkflow.start(client);
+		sendFeedback(source, "AutoAuction route reforge started for " + plan.get().name() + " -> " + plan.get().reforge() + ".");
+		return 1;
+	}
+
 	private int startTimeBasedLookCommand(CommandContext<FabricClientCommandSource> context) {
 		Minecraft client = context.getSource().getClient();
 		double x = DoubleArgumentType.getDouble(context, "x");
@@ -1848,12 +1893,188 @@ public class AutoauctionClient implements ClientModInitializer {
 		return armorStand.position().add(0.0, 0.85, 0.0);
 	}
 
+	private Optional<Villager> nearestVillagerTo(Minecraft client, Entity target, double maxDistance) {
+		if (client.level == null) {
+			return Optional.empty();
+		}
+		double maxDistanceSqr = maxDistance * maxDistance;
+		return StreamSupport.stream(client.level.entitiesForRendering().spliterator(), false)
+			.filter(Villager.class::isInstance)
+			.map(Villager.class::cast)
+			.filter(entity -> entity.distanceToSqr(target) <= maxDistanceSqr)
+			.min(Comparator.comparingDouble(entity -> entity.distanceToSqr(target)));
+	}
+
+	private boolean rightClickEntity(Minecraft client, Entity entity) {
+		if (client.player == null || client.gameMode == null || entity == null) {
+			return false;
+		}
+		client.gameMode.interact(client.player, entity, new EntityHitResult(entity, entity.getEyePosition()), InteractionHand.MAIN_HAND);
+		return true;
+	}
+
 	private String entityName(Entity entity) {
 		Component customName = entity.getCustomName();
 		if (customName != null) {
 			return customName.getString();
 		}
 		return entity.getDisplayName().getString();
+	}
+
+	private final class RouteReforgeWorkflow {
+		private static final String ROUTE_COMMAND = "/n routes test Blacksmith false false false false false true";
+		private static final double BLACKSMITH_SEARCH_DISTANCE = 32.0;
+		private static final double VILLAGER_SEARCH_DISTANCE = 3.0;
+		private static final double MOVEMENT_EPSILON_SQR = 0.0004;
+		private static final long ROUTE_TIMEOUT_MS = 60_000L;
+		private static final long STATIONARY_REQUIRED_MS = 2_000L;
+		private static final long LOOK_TIMEOUT_MS = 8_000L;
+		private static final long INTERACT_TIMEOUT_MS = 8_000L;
+		private static final long MENU_TIMEOUT_MS = 8_000L;
+
+		private final ReforgeTargetPlan.Plan plan;
+		private State state = State.WAIT_FOR_ROUTE;
+		private long startedAt;
+		private long stateStartedAt;
+		private long stationarySince;
+		private Vec3 lastPosition;
+		private boolean movedAfterStart;
+		private boolean rotationComplete;
+		private ArmorStand blacksmithStand;
+
+		private RouteReforgeWorkflow(ReforgeTargetPlan.Plan plan) {
+			this.plan = plan;
+		}
+
+		private void start(Minecraft client) {
+			startedAt = System.currentTimeMillis();
+			stateStartedAt = startedAt;
+			stationarySince = startedAt;
+			lastPosition = client.player == null ? null : client.player.position();
+			boolean handled = actions.sendClientCommand(client, ROUTE_COMMAND);
+			if (!handled) {
+				fail(client, "Nebula route command was not handled: " + ROUTE_COMMAND);
+				return;
+			}
+			sendClientFeedback(client, "AutoAuction route reforge sent: " + ROUTE_COMMAND);
+		}
+
+		private void tick(Minecraft client) {
+			if (state == State.DONE || state == State.ERROR || client.player == null) {
+				return;
+			}
+			long now = System.currentTimeMillis();
+			switch (state) {
+				case WAIT_FOR_ROUTE -> waitForRoute(client, now);
+				case LOOK_AT_BLACKSMITH -> waitForLook(client, now);
+				case INTERACT_BLACKSMITH -> interactBlacksmith(client, now);
+				case WAIT_FOR_REFORGE_MENU -> waitForReforgeMenu(client, now);
+				case DONE, ERROR -> {
+				}
+			}
+		}
+
+		private void waitForRoute(Minecraft client, long now) {
+			if (now - startedAt > ROUTE_TIMEOUT_MS) {
+				fail(client, "Timed out waiting for Nebula route to reach Blacksmith.");
+				return;
+			}
+			updateMovement(client, now);
+			Optional<ArmorStand> found = nearestNamedArmorStand(client, "blacksmith", BLACKSMITH_SEARCH_DISTANCE);
+			if (found.isEmpty()) {
+				return;
+			}
+			boolean routeHadTimeToStart = movedAfterStart || now - startedAt >= STATIONARY_REQUIRED_MS;
+			if (routeHadTimeToStart && now - stationarySince >= STATIONARY_REQUIRED_MS) {
+				blacksmithStand = found.get();
+				rotationComplete = false;
+				timeBasedRotation.startRotationTo(client, armorStandNpcLookTarget(blacksmithStand), () -> rotationComplete = true);
+				transition(State.LOOK_AT_BLACKSMITH, now);
+				sendClientFeedback(client, "AutoAuction route arrived near Blacksmith; looking at villager.");
+			}
+		}
+
+		private void updateMovement(Minecraft client, long now) {
+			Vec3 position = client.player.position();
+			if (lastPosition == null) {
+				lastPosition = position;
+				stationarySince = now;
+				return;
+			}
+			if (position.distanceToSqr(lastPosition) > MOVEMENT_EPSILON_SQR) {
+				movedAfterStart = true;
+				lastPosition = position;
+				stationarySince = now;
+			}
+		}
+
+		private void waitForLook(Minecraft client, long now) {
+			if (blacksmithStand == null) {
+				fail(client, "Blacksmith armor stand disappeared before rotation.");
+				return;
+			}
+			if (now - stateStartedAt > LOOK_TIMEOUT_MS) {
+				fail(client, "Timed out looking at Blacksmith.");
+				return;
+			}
+			if (rotationComplete || !timeBasedRotation.isActive()) {
+				transition(State.INTERACT_BLACKSMITH, now);
+			}
+		}
+
+		private void interactBlacksmith(Minecraft client, long now) {
+			if (blacksmithStand == null) {
+				fail(client, "Blacksmith armor stand disappeared before interaction.");
+				return;
+			}
+			if (now - stateStartedAt > INTERACT_TIMEOUT_MS) {
+				fail(client, "Could not find Blacksmith villager to interact with.");
+				return;
+			}
+			Optional<Villager> villager = nearestVillagerTo(client, blacksmithStand, VILLAGER_SEARCH_DISTANCE);
+			if (villager.isEmpty()) {
+				return;
+			}
+			if (!rightClickEntity(client, villager.get())) {
+				fail(client, "Could not right-click Blacksmith villager.");
+				return;
+			}
+			transition(State.WAIT_FOR_REFORGE_MENU, now);
+			sendClientFeedback(client, "AutoAuction clicked Blacksmith; waiting for Reforge Item menu.");
+		}
+
+		private void waitForReforgeMenu(Minecraft client, long now) {
+			if (actions.screenTitleContains(client, "Reforge Item")) {
+				routeReforgeWorkflow = null;
+				startReforgeWorkflow(client, plan);
+				return;
+			}
+			if (now - stateStartedAt > MENU_TIMEOUT_MS) {
+				fail(client, "Reforge Item menu did not open after clicking Blacksmith.");
+			}
+		}
+
+		private void transition(State next, long now) {
+			state = next;
+			stateStartedAt = now;
+		}
+
+		private void fail(Minecraft client, String message) {
+			state = State.ERROR;
+			routeReforgeWorkflow = null;
+			Autoauction.LOGGER.error("AutoAuction route reforge failed: {}", message);
+			sendClientFeedback(client, "AutoAuction route reforge failed: " + message);
+			notifyIssueAsync("route reforge failed: " + message);
+		}
+
+		private enum State {
+			WAIT_FOR_ROUTE,
+			LOOK_AT_BLACKSMITH,
+			INTERACT_BLACKSMITH,
+			WAIT_FOR_REFORGE_MENU,
+			DONE,
+			ERROR
+		}
 	}
 
 	private void startPendingReforge(Minecraft client) {
@@ -1870,6 +2091,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		ReforgeTargetPlan.Plan plan = pendingReforgePlan;
 		pendingReforgePlan = null;
+		startReforgeWorkflow(client, plan);
+	}
+
+	private void startReforgeWorkflow(Minecraft client, ReforgeTargetPlan.Plan plan) {
 		reforgeWorkflow = new ReforgeWorkflow(
 			plan,
 			actions,
@@ -1895,6 +2120,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
 			|| finalDestinationCraftWorkflow != null
+			|| routeReforgeWorkflow != null
 			|| reforgeWorkflow != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
@@ -2385,6 +2611,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void cancelAutomation(Minecraft client, String reason) {
 		realWorkflow = null;
 		pendingReforgePlan = null;
+		routeReforgeWorkflow = null;
 		reforgeWorkflow = null;
 		workflowStarted = false;
 		controller.stop();
