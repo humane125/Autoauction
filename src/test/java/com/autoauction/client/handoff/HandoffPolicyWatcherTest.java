@@ -22,9 +22,37 @@ class HandoffPolicyWatcherTest {
 	}
 
 	@Test
-	void defersToArmorListingAtTwentyFiveThousand() {
+	void manualPolicyBelowTwentyFiveThousandDoesNotAutoListAtTwentyFiveThousand() {
 		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
 		HandoffPolicySnapshot policy = new HandoffPolicySnapshot("Macro", "uuid-one", 12_500, "NEXT_ACCOUNT", 0);
+
+		assertEquals(HandoffPolicyWatcher.Decision.NON_LISTING_HANDOFF, watcher.decide(25_000, policy));
+	}
+
+	@Test
+	void manualPolicyAtTwentyFiveThousandListsBeforeApplyingPolicyAction() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot disconnectPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "DISCONNECT_AND_WAIT", 0);
+		HandoffPolicySnapshot nextPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "NEXT_ACCOUNT", 0);
+
+		assertEquals(HandoffPolicyWatcher.Decision.NONE, watcher.decide(24_999, disconnectPolicy));
+		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(25_000, disconnectPolicy));
+		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(25_000, nextPolicy));
+	}
+
+	@Test
+	void manualListArmorPolicyBelowTwentyFiveThousandWaitsInsteadOfListingEarly() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot("Macro", "uuid-one", 12_500, "LIST_ARMOR", 0);
+
+		assertEquals(HandoffPolicyWatcher.Decision.NONE, watcher.decide(12_500, policy));
+		assertEquals(HandoffPolicyWatcher.Decision.NONE, watcher.decide(25_000, policy));
+	}
+
+	@Test
+	void manualListArmorPolicyAtTwentyFiveThousandLists() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "LIST_ARMOR", 0);
 
 		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(25_000, policy));
 	}

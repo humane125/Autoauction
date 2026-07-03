@@ -7,10 +7,16 @@ public final class HandoffPolicyWatcher {
 		if (policy == null || lowestFinalDestinationKills < policy.killLimit()) {
 			return Decision.NONE;
 		}
-		if (policy.finalListing() || policy.listArmor()) {
-			return Decision.LIST_ARMOR;
+		if (policy.schedulerPolicy()) {
+			return policy.finalListing() || policy.listArmor()
+				? Decision.LIST_ARMOR
+				: Decision.NON_LISTING_HANDOFF;
 		}
-		if (!policy.schedulerPolicy() && lowestFinalDestinationKills >= ARMOR_LISTING_KILL_LIMIT) {
+		boolean policyAllowsArmorListing = policy.killLimit() >= ARMOR_LISTING_KILL_LIMIT;
+		if ((policy.finalListing() || policy.listArmor()) && !policyAllowsArmorListing) {
+			return Decision.NONE;
+		}
+		if (policyAllowsArmorListing && lowestFinalDestinationKills >= ARMOR_LISTING_KILL_LIMIT) {
 			return Decision.LIST_ARMOR;
 		}
 		return Decision.NON_LISTING_HANDOFF;
