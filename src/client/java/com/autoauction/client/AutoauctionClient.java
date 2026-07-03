@@ -131,6 +131,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int REMOTE_SCREENSHOT_MAX_WIDTH = 1280;
 	private static final int REMOTE_SCREENSHOT_MAX_HEIGHT = 720;
 
+	private static AutoauctionClient instance;
+
 	private AutoAuctionConfig config;
 	private AutoAuctionConfigStore configStore;
 	private AuctionAutomationController controller;
@@ -196,6 +198,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		try {
+			instance = this;
 			this.configStore = new AutoAuctionConfigStore(FabricLoader.getInstance().getConfigDir());
 			this.config = configStore.load();
 			this.controller = new AuctionAutomationController(config);
@@ -241,7 +244,6 @@ public class AutoauctionClient implements ClientModInitializer {
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
 				handleLobbyCollision(client);
-				smoothLookController.tick(client);
 				handleReforgeHotkey(client);
 				handleDumpSlotsHotkey(client);
 				handleEmergencyStopHotkey(client);
@@ -1119,6 +1121,12 @@ public class AutoauctionClient implements ClientModInitializer {
 				lastNebulaMacroStatusResultAt = System.currentTimeMillis();
 			}
 			reportNebulaMacroIntentIfChanged(beforeState, beforeDesiredOn);
+		}
+	}
+
+	public static void renderSmoothLook(Minecraft client) {
+		if (instance != null) {
+			instance.smoothLookController.tick(client);
 		}
 	}
 

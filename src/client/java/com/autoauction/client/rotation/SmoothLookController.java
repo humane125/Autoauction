@@ -70,6 +70,8 @@ public final class SmoothLookController {
 	private void applyRotation(Minecraft client, float yaw, float pitch) {
 		client.player.setYRot(yaw);
 		client.player.setXRot(pitch);
+		client.player.yRotO = yaw;
+		client.player.xRotO = pitch;
 	}
 
 	private long durationForDistance(float degrees) {
