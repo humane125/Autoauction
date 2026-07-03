@@ -116,6 +116,38 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void completedEnsureOnDoesNotBlockLaterAutoRestore() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.ensureOn(commands::add, 1_000L));
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 1_500L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND, NebulaMacroController.TOGGLE_COMMAND), commands);
+	}
+
+	@Test
+	void programmaticStartClearsPreviousManualDisableSuppression() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.COMPLETE, controller.ensureOn(commands::add, 1_000L));
+		assertEquals(NebulaMacroController.ManualToggleIntentResult.DISABLING, controller.recordManualToggleIntent(1_500L));
+
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.requestProgrammaticOn(commands::add, 1_600L));
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND, NebulaMacroController.TOGGLE_COMMAND), commands);
+	}
+
+	@Test
 	void observedEnabledAloneDoesNotMakeAutoRestoreDesired() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();

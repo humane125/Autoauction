@@ -32,6 +32,7 @@ public final class NebulaMacroController {
 		}
 		observedState = parsedState.get();
 		applyPendingManualToggleResult();
+		completeOperationIfTargetObserved();
 	}
 
 	public void onGuiChatMessage(String message) {
@@ -51,6 +52,11 @@ public final class NebulaMacroController {
 			startOperation(Operation.ENSURE_ON, nowMs);
 		}
 		return waitForState(commandSink, nowMs, ObservedState.ON);
+	}
+
+	public EnsureResult requestProgrammaticOn(Consumer<String> commandSink, long nowMs) {
+		clearManualTogglePending();
+		return ensureOn(commandSink, nowMs);
 	}
 
 	public EnsureResult ensureOff(Consumer<String> commandSink, long nowMs) {
@@ -248,6 +254,15 @@ public final class NebulaMacroController {
 		} else if (observedState == ObservedState.OFF) {
 			desiredOn = false;
 			clearManualTogglePending();
+		}
+	}
+
+	private void completeOperationIfTargetObserved() {
+		if (operation == Operation.ENSURE_ON && observedState == ObservedState.ON) {
+			clearOperation();
+		} else if ((operation == Operation.ENSURE_OFF || operation == Operation.ENSURE_OFF_AFTER_ENABLED)
+			&& observedState == ObservedState.OFF) {
+			clearOperation();
 		}
 	}
 

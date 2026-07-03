@@ -400,7 +400,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startMacroFromRemote(Minecraft client) {
-		NebulaMacroController.EnsureResult result = macroController.ensureOn(
+		NebulaMacroController.EnsureResult result = requestRemoteMacroStart(
+			macroController,
 			command -> runMacroToggleCommand(client, command),
 			System.currentTimeMillis()
 		);
@@ -4244,6 +4245,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		long nowMs
 	) {
 		return controller.ensureOff(commandSink, nowMs);
+	}
+
+	static NebulaMacroController.EnsureResult requestRemoteMacroStart(
+		NebulaMacroController controller,
+		Consumer<String> commandSink,
+		long nowMs
+	) {
+		return controller.requestProgrammaticOn(commandSink, nowMs);
 	}
 
 	static int bazaarCloseDelayMs() {

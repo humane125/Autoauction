@@ -113,6 +113,21 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void remoteMacroStartEnablesAutoRetoggleAfterPreviousStopIntent() {
+		NebulaMacroController controller = new NebulaMacroController();
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		controller.ensureOn(command -> {}, 1_000L);
+		controller.recordManualToggleIntent(1_500L);
+		List<String> commands = new ArrayList<>();
+
+		NebulaMacroController.EnsureResult result = AutoauctionClient.requestRemoteMacroStart(controller, commands::add, 2_000L);
+
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, result);
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+		assertEquals(true, controller.desiredOn());
+	}
+
+	@Test
 	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
 		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
 	}
