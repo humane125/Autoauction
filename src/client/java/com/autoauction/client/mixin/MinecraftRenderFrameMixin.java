@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Minecraft.class)
 public class MinecraftRenderFrameMixin {
 	@Inject(method = "renderFrame", at = @At("HEAD"))
-	private void autoauction$renderSmoothLook(boolean tick, CallbackInfo info) {
-		AutoauctionClient.renderSmoothLook((Minecraft) (Object) this);
+	private void autoauction$renderTimeBasedRotation(boolean tick, CallbackInfo info) {
+		AutoauctionClient.renderTimeBasedRotation((Minecraft) (Object) this);
 	}
 }

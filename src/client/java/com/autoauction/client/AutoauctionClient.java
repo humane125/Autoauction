@@ -32,7 +32,7 @@ import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.reforge.ReforgeTargetPlan;
 import com.autoauction.client.reforge.ReforgeWorkflow;
-import com.autoauction.client.rotation.SmoothLookController;
+import com.autoauction.client.rotation.TimeBasedRotation;
 import com.autoauction.client.stats.AccountStatsSnapshot;
 import com.autoauction.client.stats.AccountStatsSendPolicy;
 import com.autoauction.client.stats.SummoningEyeEventDetector;
@@ -78,6 +78,8 @@ import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerScoreEntry;
@@ -103,6 +105,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.stream.StreamSupport;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
@@ -151,7 +154,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
 	private final HandoffPolicyWatcher handoffPolicyWatcher = new HandoffPolicyWatcher();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
-	private final SmoothLookController smoothLookController = new SmoothLookController();
+	private final TimeBasedRotation timeBasedRotation = new TimeBasedRotation();
 	private int tickCounter;
 	private int nebulaLatestLogPollTicks;
 	private AccountStatsSnapshot lastSentAccountStats;
@@ -1124,9 +1127,9 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
-	public static void renderSmoothLook(Minecraft client) {
+	public static void renderTimeBasedRotation(Minecraft client) {
 		if (instance != null) {
-			instance.smoothLookController.tick(client);
+			instance.timeBasedRotation.tick(client);
 		}
 	}
 
@@ -1678,9 +1681,10 @@ public class AutoauctionClient implements ClientModInitializer {
 						.executes(context ->
 						armReforge(context.getSource(), "voidwalker", StringArgumentType.getString(context, "reforge"))))))
 			.then(literal("lookat")
+				.then(literal("blacksmith").executes(this::lookAtBlacksmithCommand))
 				.then(argument("x", DoubleArgumentType.doubleArg())
 					.then(argument("y", DoubleArgumentType.doubleArg())
-						.then(argument("z", DoubleArgumentType.doubleArg()).executes(this::startSmoothLookCommand)))))
+						.then(argument("z", DoubleArgumentType.doubleArg()).executes(this::startTimeBasedLookCommand)))))
 			.then(literal("debug")
 				.executes(context -> {
 					sendFeedback(context.getSource(), debugStatusMessage());
@@ -1802,15 +1806,54 @@ public class AutoauctionClient implements ClientModInitializer {
 		return 1;
 	}
 
-	private int startSmoothLookCommand(CommandContext<FabricClientCommandSource> context) {
+	private int startTimeBasedLookCommand(CommandContext<FabricClientCommandSource> context) {
 		Minecraft client = context.getSource().getClient();
 		double x = DoubleArgumentType.getDouble(context, "x");
 		double y = DoubleArgumentType.getDouble(context, "y");
 		double z = DoubleArgumentType.getDouble(context, "z");
-		smoothLookController.lookAt(client, new Vec3(x, y, z),
-			() -> sendClientFeedback(client, "AutoAuction smooth look finished."));
-		sendFeedback(context.getSource(), "AutoAuction smooth look started.");
+		timeBasedRotation.startRotationTo(client, new Vec3(x, y, z),
+			() -> sendClientFeedback(client, "AutoAuction rotation finished."));
+		sendFeedback(context.getSource(), "AutoAuction rotation started.");
 		return 1;
+	}
+
+	private int lookAtBlacksmithCommand(CommandContext<FabricClientCommandSource> context) {
+		Minecraft client = context.getSource().getClient();
+		Optional<ArmorStand> blacksmith = nearestNamedArmorStand(client, "blacksmith", 32.0);
+		if (blacksmith.isEmpty()) {
+			sendFeedback(context.getSource(), "AutoAuction could not find a nearby Blacksmith armor stand.");
+			return 0;
+		}
+
+		timeBasedRotation.startRotationTo(client, armorStandNpcLookTarget(blacksmith.get()),
+			() -> sendClientFeedback(client, "AutoAuction looked at Blacksmith."));
+		sendFeedback(context.getSource(), "AutoAuction looking at Blacksmith.");
+		return 1;
+	}
+
+	private Optional<ArmorStand> nearestNamedArmorStand(Minecraft client, String name, double maxDistance) {
+		if (client.player == null || client.level == null) {
+			return Optional.empty();
+		}
+		double maxDistanceSqr = maxDistance * maxDistance;
+		return StreamSupport.stream(client.level.entitiesForRendering().spliterator(), false)
+			.filter(ArmorStand.class::isInstance)
+			.map(ArmorStand.class::cast)
+			.filter(entity -> entity.distanceToSqr(client.player) <= maxDistanceSqr)
+			.filter(entity -> NamedEntityMatcher.matchesName(entityName(entity), name))
+			.min(Comparator.comparingDouble(entity -> entity.distanceToSqr(client.player)));
+	}
+
+	private Vec3 armorStandNpcLookTarget(ArmorStand armorStand) {
+		return armorStand.position().add(0.0, 0.85, 0.0);
+	}
+
+	private String entityName(Entity entity) {
+		Component customName = entity.getCustomName();
+		if (customName != null) {
+			return customName.getString();
+		}
+		return entity.getDisplayName().getString();
 	}
 
 	private void startPendingReforge(Minecraft client) {
