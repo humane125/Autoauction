@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SkyBlockStatusTest {
@@ -50,5 +51,13 @@ class SkyBlockStatusTest {
 		assertTrue(status.area().isEmpty());
 		assertTrue(status.currentIsland().isEmpty());
 		assertTrue(status.purse().isEmpty());
+	}
+
+	@Test
+	void detectsSkyBlockFromScoreboardTitle() {
+		assertTrue(SkyBlockStatus.hasSkyBlockScoreboard(List.of("title=SKYBLOCK", "Purse: 32,444,946")));
+		assertTrue(SkyBlockStatus.hasSkyBlockScoreboard(List.of("SKYBLOCK", "Purse: 32,444,946")));
+		assertFalse(SkyBlockStatus.hasSkyBlockScoreboard(List.of("title=HYPIXEL", "Lobby")));
+		assertFalse(SkyBlockStatus.hasSkyBlockScoreboard(List.of()));
 	}
 }

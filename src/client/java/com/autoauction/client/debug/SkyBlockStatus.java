@@ -32,6 +32,19 @@ public record SkyBlockStatus(Optional<String> area, Optional<Island> currentIsla
 		return new SkyBlockStatus(area, island, purse);
 	}
 
+	public static boolean hasSkyBlockScoreboard(List<String> scoreboardLines) {
+		for (String line : safeLines(scoreboardLines)) {
+			String clean = cleanLine(line);
+			if (clean.regionMatches(true, 0, "title=", 0, "title=".length())) {
+				clean = clean.substring("title=".length()).trim();
+			}
+			if (clean.equalsIgnoreCase("SKYBLOCK")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public static String cleanLine(String line) {
 		return String.valueOf(line == null ? "" : line)
 			.replaceAll("\u00a7.", "")

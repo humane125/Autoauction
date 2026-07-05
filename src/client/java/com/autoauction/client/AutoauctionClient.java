@@ -24,6 +24,7 @@ import com.autoauction.client.handoff.HandoffPolicySnapshot;
 import com.autoauction.client.handoff.HandoffPolicySwitchPreparation;
 import com.autoauction.client.handoff.HandoffPolicyWatcher;
 import com.autoauction.client.lobby.LobbyCollisionController;
+import com.autoauction.client.macro.MacroStuckRecoveryController;
 import com.autoauction.client.macro.NebulaGuiInputTracker;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
@@ -157,6 +158,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private NebulaMacroController macroController;
 	private NebulaLatestLogWatcher nebulaLatestLogWatcher;
 	private final NebulaGuiInputTracker nebulaGuiInputTracker = new NebulaGuiInputTracker();
+	private final MacroStuckRecoveryController macroStuckRecoveryController = new MacroStuckRecoveryController();
 	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
 	private final HandoffPolicyWatcher handoffPolicyWatcher = new HandoffPolicyWatcher();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
@@ -253,6 +255,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				observeNebulaGuiKeybind(client);
 				observeNebulaMacroKeybind(client);
 				autoRestoreNebulaMacroIfNeeded(client);
+				handleMacroStuckRecovery(client);
 				handleLobbyCollision(client);
 				handleReforgeHotkey(client);
 				handleDumpSlotsHotkey(client);
@@ -1308,6 +1311,35 @@ public class AutoauctionClient implements ClientModInitializer {
 			default -> {
 			}
 		}
+	}
+
+	private void handleMacroStuckRecovery(Minecraft client) {
+		if (macroController == null || actions == null || client.player == null) {
+			return;
+		}
+		List<String> scoreboardLines = readScoreboardLines(client);
+		Vec3 position = client.player.position();
+		macroStuckRecoveryController.tick(
+			new MacroStuckRecoveryController.Snapshot(
+				new MacroStuckRecoveryController.Position(position.x, position.y, position.z),
+				client.player != null,
+				SkyBlockStatus.hasSkyBlockScoreboard(scoreboardLines),
+				System.currentTimeMillis()
+			),
+			macroController,
+			command -> runMacroRecoveryCommand(client, command),
+			message -> sendRemoteDebugLog("warn", "nebula", message)
+		);
+	}
+
+	private void runMacroRecoveryCommand(Minecraft client, String command) {
+		if (NebulaMacroController.isToggleCommand(command)) {
+			runMacroToggleCommand(client, command);
+			sendRemoteDebugLog("info", "nebula", "Macro stuck recovery sent Nebula macro toggle.");
+			return;
+		}
+		actions.sendChatCommand(client, command);
+		sendRemoteDebugLog("info", "nebula", "Macro stuck recovery sent command " + command + ".");
 	}
 
 	private void pollNebulaLatestLog() {

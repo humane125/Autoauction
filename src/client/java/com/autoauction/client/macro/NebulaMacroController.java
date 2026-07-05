@@ -65,6 +65,31 @@ public final class NebulaMacroController {
 		return ensureOn(commandSink, nowMs);
 	}
 
+	public EnsureResult restartOn(Consumer<String> commandSink, long nowMs) {
+		desiredOn = true;
+		manualDisableSuppressed = false;
+		clearManualTogglePending();
+		if (operation != Operation.RESTART_OFF && operation != Operation.RESTART_ON) {
+			startOperation(Operation.RESTART_OFF, nowMs);
+		}
+		if (operation == Operation.RESTART_OFF) {
+			if (observedState == ObservedState.OFF) {
+				startOperation(Operation.RESTART_ON, nowMs);
+				return waitForState(commandSink, nowMs, ObservedState.ON);
+			}
+			if (!toggleSent) {
+				sendToggle(commandSink);
+				return EnsureResult.PENDING;
+			}
+			if (timedOut(nowMs)) {
+				clearOperation();
+				return EnsureResult.FAILED;
+			}
+			return EnsureResult.PENDING;
+		}
+		return waitForState(commandSink, nowMs, ObservedState.ON);
+	}
+
 	public EnsureResult ensureOff(Consumer<String> commandSink, long nowMs) {
 		desiredOn = false;
 		if (observedState == ObservedState.OFF) {
@@ -316,6 +341,8 @@ public final class NebulaMacroController {
 		NONE,
 		ENSURE_ON,
 		ENSURE_OFF,
-		ENSURE_OFF_AFTER_ENABLED
+		ENSURE_OFF_AFTER_ENABLED,
+		RESTART_OFF,
+		RESTART_ON
 	}
 }
