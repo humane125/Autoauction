@@ -248,7 +248,7 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
-	void manualDisableIntentSuppressesAutoRestoreFromAnyObservedState() {
+	void observedEnabledAfterManualDisableArmsAutoRestoreAgain() {
 		NebulaMacroController controller = new NebulaMacroController();
 		List<String> commands = new ArrayList<>();
 
@@ -257,13 +257,11 @@ class NebulaMacroControllerTest {
 		assertFalse(controller.desiredOn());
 
 		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
-		assertFalse(controller.desiredOn());
-		controller.recordManualDisableIntent();
-		assertFalse(controller.desiredOn());
+		assertTrue(controller.desiredOn());
 
 		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
-		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 2_000L));
-		assertEquals(List.of(), commands);
+		assertEquals(NebulaMacroController.AutoRestoreResult.STARTED, controller.autoRestoreIfDisabled(commands::add, 2_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
 	}
 
 	@Test

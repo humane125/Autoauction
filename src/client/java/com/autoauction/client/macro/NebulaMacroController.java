@@ -33,8 +33,9 @@ public final class NebulaMacroController {
 		}
 		observedState = parsedState.get();
 		applyPendingManualToggleResult();
-		if (observedState == ObservedState.ON && !manualDisableSuppressed) {
+		if (observedState == ObservedState.ON) {
 			desiredOn = true;
+			manualDisableSuppressed = false;
 		}
 		completeOperationIfTargetObserved();
 	}
