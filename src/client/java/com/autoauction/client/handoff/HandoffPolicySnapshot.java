@@ -9,10 +9,25 @@ public record HandoffPolicySnapshot(
 	String phase,
 	boolean finalListing,
 	String nextTarget,
-	boolean waitAfterHandoff
+	boolean waitAfterHandoff,
+	String triggerKey
 ) {
 	public HandoffPolicySnapshot(String username, String uuid, int killLimit, String action, int stopHours) {
-		this(username, uuid, killLimit, action, stopHours, "", false, "", false);
+		this(username, uuid, killLimit, action, stopHours, "", false, "", false, "");
+	}
+
+	public HandoffPolicySnapshot(
+		String username,
+		String uuid,
+		int killLimit,
+		String action,
+		int stopHours,
+		String phase,
+		boolean finalListing,
+		String nextTarget,
+		boolean waitAfterHandoff
+	) {
+		this(username, uuid, killLimit, action, stopHours, phase, finalListing, nextTarget, waitAfterHandoff, "");
 	}
 
 	public boolean nextAccount() {

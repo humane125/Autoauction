@@ -214,7 +214,8 @@ public final class AltManagerHandoffClient {
 			optionalStringRecordValue(policy, "phase"),
 			optionalBooleanRecordValue(policy, "finalListing"),
 			optionalStringRecordValue(policy, "nextAccount"),
-			optionalBooleanRecordValue(policy, "waitAfterHandoff")
+			optionalBooleanRecordValue(policy, "waitAfterHandoff"),
+			optionalStringRecordValue(policy, "triggerKey")
 		);
 	}
 

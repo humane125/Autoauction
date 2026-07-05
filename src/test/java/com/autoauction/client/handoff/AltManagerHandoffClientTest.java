@@ -90,7 +90,8 @@ class AltManagerHandoffClientTest {
 			"SHORT_ROTATION",
 			false,
 			"next-uuid",
-			true
+			true,
+			"schedule-key-1"
 		));
 		AltManagerHandoffClient client = new AltManagerHandoffClient(
 			FakeAccountSwitcher.class.getName(),
@@ -107,6 +108,7 @@ class AltManagerHandoffClientTest {
 		assertEquals("SHORT_ROTATION", policy.get().phase());
 		assertEquals("next-uuid", policy.get().nextTarget());
 		assertTrue(policy.get().waitAfterHandoff());
+		assertEquals("schedule-key-1", policy.get().triggerKey());
 	}
 
 	@Test
@@ -228,7 +230,8 @@ class AltManagerHandoffClientTest {
 		String phase,
 		boolean finalListing,
 		String nextAccount,
-		boolean waitAfterHandoff
+		boolean waitAfterHandoff,
+		String triggerKey
 	) {
 	}
 }

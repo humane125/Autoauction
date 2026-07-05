@@ -1430,6 +1430,8 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 		String triggerKey = handoffPolicyTriggerKey(client, policy.get());
 		if (triggerKey.equals(lastHandoffPolicyTriggerKey)) {
+			sendRemoteDebugLog("info", "handoff",
+				"Handoff policy trigger skipped because it already ran for key " + triggerKey + ".");
 			return;
 		}
 		lastHandoffPolicyTriggerKey = triggerKey;
@@ -1473,10 +1475,13 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
 		String currentUsername = client.getUser() == null ? "" : client.getUser().getName();
+		String policyKey = policy.triggerKey() == null || policy.triggerKey().isBlank()
+			? policy.uuid().toLowerCase(Locale.ROOT) + "|"
+				+ policy.killLimit() + "|"
+				+ policy.action().toLowerCase(Locale.ROOT)
+			: policy.triggerKey().toLowerCase(Locale.ROOT);
 		return currentUsername.toLowerCase(Locale.ROOT) + "|"
-			+ policy.uuid().toLowerCase(Locale.ROOT) + "|"
-			+ policy.killLimit() + "|"
-			+ policy.action().toLowerCase(Locale.ROOT);
+			+ policyKey;
 	}
 
 	private Optional<AccountStatsSnapshot> currentAccountStatsSnapshot(Minecraft client) {
