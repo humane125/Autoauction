@@ -348,6 +348,23 @@ class NebulaMacroControllerTest {
 	}
 
 	@Test
+	void autoRestoreDoesNotRaceProgrammaticRestart() {
+		NebulaMacroController controller = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.restartOn(commands::add, 1_000L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+
+		controller.onChatMessage("NebulaClient > Combat Macro: Disabled");
+		assertEquals(NebulaMacroController.AutoRestoreResult.IDLE, controller.autoRestoreIfDisabled(commands::add, 1_050L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND), commands);
+
+		assertEquals(NebulaMacroController.EnsureResult.PENDING, controller.restartOn(commands::add, 1_100L));
+		assertEquals(List.of(NebulaMacroController.TOGGLE_COMMAND, NebulaMacroController.TOGGLE_COMMAND), commands);
+	}
+
+	@Test
 	void recognizesNebulaToggleCommand() {
 		assertTrue(NebulaMacroController.isToggleCommand("/n toggleMacro combat macro"));
 		assertTrue(NebulaMacroController.isToggleCommand("n   togglemacro   combat   macro"));

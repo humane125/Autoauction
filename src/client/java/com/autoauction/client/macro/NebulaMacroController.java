@@ -118,6 +118,9 @@ public final class NebulaMacroController {
 	}
 
 	public AutoRestoreResult autoRestoreIfDisabled(Consumer<String> commandSink, long nowMs) {
+		if (operation == Operation.RESTART_OFF || operation == Operation.RESTART_ON) {
+			return AutoRestoreResult.IDLE;
+		}
 		if (manualTogglePending) {
 			if (!timedOut(nowMs, manualToggleStartedAt)) {
 				return AutoRestoreResult.IDLE;
