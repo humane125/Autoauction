@@ -22,6 +22,7 @@ import com.autoauction.client.domain.TestArmorSnapshots;
 import com.autoauction.client.handoff.AltManagerHandoffClient;
 import com.autoauction.client.handoff.HandoffPolicySnapshot;
 import com.autoauction.client.handoff.HandoffPolicySwitchPreparation;
+import com.autoauction.client.handoff.HandoffPolicyTriggerGuard;
 import com.autoauction.client.handoff.HandoffPolicyWatcher;
 import com.autoauction.client.lobby.LobbyCollisionController;
 import com.autoauction.client.macro.MacroStuckRecoveryController;
@@ -205,7 +206,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingHandoff pendingHandoff;
 	private PendingHandoffPolicyAction pendingHandoffPolicyAction;
 	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
-	private String lastHandoffPolicyTriggerKey = "";
+	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 
 	@Override
 	public void onInitializeClient() {
@@ -1429,13 +1430,12 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		String triggerKey = handoffPolicyTriggerKey(client, policy.get());
-		if (triggerKey.equals(lastHandoffPolicyTriggerKey)) {
+		if (!handoffPolicyTriggerGuard.start(triggerKey)) {
 			sendRemoteDebugLog("info", "handoff",
 				"Handoff policy trigger skipped because it already ran for key " + triggerKey + ".");
 			return;
 		}
-		lastHandoffPolicyTriggerKey = triggerKey;
-		pendingHandoffPolicyAction = new PendingHandoffPolicyAction(policy.get());
+		pendingHandoffPolicyAction = new PendingHandoffPolicyAction(policy.get(), triggerKey);
 		sendRemoteClientLog(
 			"info",
 			"Handoff policy reached " + policy.get().killLimit() + " FD kills; action=" + policy.get().action()
@@ -4133,15 +4133,18 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private final class PendingHandoffPolicyAction {
 		private final HandoffPolicySnapshot policy;
+		private final String triggerKey;
 		private State state = State.STOP_MACRO;
 		private HandoffPolicySwitchPreparation switchPreparation;
 
-		private PendingHandoffPolicyAction(HandoffPolicySnapshot policy) {
+		private PendingHandoffPolicyAction(HandoffPolicySnapshot policy, String triggerKey) {
 			this.policy = policy;
+			this.triggerKey = triggerKey;
 		}
 
 		private void tick(Minecraft client) {
 			if (macroController == null || actions == null || controller == null) {
+				handoffPolicyTriggerGuard.fail(triggerKey);
 				pendingHandoffPolicyAction = null;
 				return;
 			}
@@ -4158,6 +4161,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					if (result == NebulaMacroController.EnsureResult.FAILED) {
 						notifyIssueAsync("handoff policy macro disable confirmation timed out");
 						sendRemoteClientLog("error", "Handoff policy stopped: macro disable confirmation timed out.");
+						handoffPolicyTriggerGuard.fail(triggerKey);
 						pendingHandoffPolicyAction = null;
 						return;
 					}
@@ -4190,6 +4194,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				if (pendingHandoff != null) {
 					actions.disconnect(client, "AutoAuction handoff policy switched accounts.");
 					sendRemoteClientLog("info", "Handoff policy switched to next Alt Manager account.");
+					handoffPolicyTriggerGuard.complete(triggerKey);
+				} else {
+					handoffPolicyTriggerGuard.fail(triggerKey);
 				}
 				pendingHandoffPolicyAction = null;
 				return;
@@ -4200,12 +4207,14 @@ public class AutoauctionClient implements ClientModInitializer {
 				pendingHandoffPolicyStop = new PendingHandoffPolicyStop(System.currentTimeMillis() + delayMs);
 				actions.disconnect(client, "AutoAuction handoff policy stop timer started.");
 				sendRemoteClientLog("info", "Handoff policy stopped macro for " + policy.stopHours() + " hour(s).");
+				handoffPolicyTriggerGuard.complete(triggerKey);
 				pendingHandoffPolicyAction = null;
 				return;
 			}
 
 			actions.disconnect(client, "AutoAuction handoff policy disconnect-and-wait.");
 			sendRemoteClientLog("info", "Handoff policy disconnected and is waiting for manual action.");
+			handoffPolicyTriggerGuard.complete(triggerKey);
 			pendingHandoffPolicyAction = null;
 		}
 

@@ -29,17 +29,27 @@ public final class MacroStuckRecoveryController {
 			state = State.IDLE;
 			return;
 		}
-		updateMovement(snapshot);
 		if (state != State.IDLE && !macroController.desiredOn()) {
 			resetRecovery();
+			resetMovement();
 			logSink.accept("Macro stuck recovery cancelled because macro desired state is OFF.");
 			return;
 		}
+		if (state == State.IDLE && !macroEligibleForRecovery(macroController)) {
+			resetMovement();
+			return;
+		}
+		updateMovement(snapshot);
 		switch (state) {
 			case IDLE -> maybeStartRecovery(snapshot, macroController, commandSink, logSink);
 			case HUB_WAIT -> tickHubWait(snapshot, macroController, commandSink, logSink);
 			case RESTARTING -> tickRestart(snapshot, macroController, commandSink, logSink);
 		}
+	}
+
+	private boolean macroEligibleForRecovery(NebulaMacroController macroController) {
+		return macroController.desiredOn()
+			&& macroController.observedState() == NebulaMacroController.ObservedState.ON;
 	}
 
 	private void maybeStartRecovery(

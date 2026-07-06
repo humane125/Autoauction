@@ -63,6 +63,19 @@ class MacroStuckRecoveryControllerTest {
 	}
 
 	@Test
+	void stationaryTimeBeforeMacroIsOnDoesNotTriggerImmediateRecovery() {
+		MacroStuckRecoveryController controller = new MacroStuckRecoveryController();
+		NebulaMacroController macro = new NebulaMacroController();
+		List<String> commands = new ArrayList<>();
+
+		controller.tick(snapshot(0, true, 1_000L), macro, commands::add, message -> {});
+		macro.onChatMessage("NebulaClient > Combat Macro: Enabled");
+		controller.tick(snapshot(0, true, 25_000L), macro, commands::add, message -> {});
+
+		assertEquals(List.of(), commands);
+	}
+
+	@Test
 	void manualStopCancelsPendingHubRecovery() {
 		MacroStuckRecoveryController controller = new MacroStuckRecoveryController();
 		NebulaMacroController macro = enabledMacro();
