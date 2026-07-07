@@ -344,6 +344,89 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void schedulerCraftReforgeContinuationWaitsWhenSchedulerStartsWaitModule() {
+		HandoffPolicySnapshot nextPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"NEXT_ACCOUNT",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.WAIT,
+			AutoauctionClient.schedulerCraftReforgeContinuation(10_000L, 20_000L, Optional.of(nextPolicy))
+		);
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.WAIT,
+			AutoauctionClient.schedulerCraftReforgeContinuation(10_000L, 20_000L, Optional.empty())
+		);
+	}
+
+	@Test
+	void schedulerCraftReforgeContinuationAppliesNextSchedulerPolicyAfterWaitCompletes() {
+		HandoffPolicySnapshot nextPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"NEXT_ACCOUNT",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"uuid-two",
+			false
+		);
+
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.APPLY_POLICY,
+			AutoauctionClient.schedulerCraftReforgeContinuation(20_000L, 10_000L, Optional.of(nextPolicy))
+		);
+	}
+
+	@Test
+	void schedulerCraftReforgeContinuationFinishesWhenNoWaitOrRunnablePolicyRemain() {
+		HandoffPolicySnapshot manualPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "NEXT_ACCOUNT", 0);
+		HandoffPolicySnapshot nextCraftPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false
+		);
+
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.NONE,
+			AutoauctionClient.schedulerCraftReforgeContinuation(20_000L, 10_000L, Optional.empty())
+		);
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.NONE,
+			AutoauctionClient.schedulerCraftReforgeContinuation(20_000L, 10_000L, Optional.of(manualPolicy))
+		);
+		assertEquals(
+			AutoauctionClient.SchedulerCraftReforgeContinuation.NONE,
+			AutoauctionClient.schedulerCraftReforgeContinuation(20_000L, 10_000L, Optional.of(nextCraftPolicy))
+		);
+	}
+
+	@Test
+	void schedulerCraftReforgeRequiresNoPreexistingEquippedFinalDestinationArmor() {
+		EnumMap<ArmorPiece, ArmorSnapshot> equippedArmor = new EnumMap<>(ArmorPiece.class);
+		equippedArmor.put(ArmorPiece.HELMET,
+			new ArmorSnapshot(ArmorPiece.HELMET, "Fierce Final Destination Helmet", "Final Destination Helmet", 25_000, false, 0));
+
+		assertFalse(AutoauctionClient.schedulerCraftReforgeHasPreexistingEquippedArmor(new EnumMap<>(ArmorPiece.class)));
+		assertTrue(AutoauctionClient.schedulerCraftReforgeHasPreexistingEquippedArmor(equippedArmor));
+	}
+
+	@Test
 	void minecraftUsernameComparisonIgnoresCaseAndRejectsBlanks() {
 		assertEquals(true, AutoauctionClient.sameMinecraftUsername("SenderOne", "senderone"));
 		assertEquals(false, AutoauctionClient.sameMinecraftUsername("SenderOne", "OtherSender"));

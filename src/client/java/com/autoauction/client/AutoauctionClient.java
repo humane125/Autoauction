@@ -1623,8 +1623,15 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (handoffClient == null) {
 			return;
 		}
+		long now = System.currentTimeMillis();
+		long scheduleWaitUntil = handoffClient.currentScheduleWaitUntilEpochMs();
 		Optional<HandoffPolicySnapshot> nextPolicy = handoffClient.currentHandoffPolicy();
-		if (nextPolicy.isEmpty() || !nextPolicy.get().schedulerPolicy() || nextPolicy.get().listArmor() || nextPolicy.get().craftReforgeArmor()) {
+		SchedulerCraftReforgeContinuation continuation = schedulerCraftReforgeContinuation(now, scheduleWaitUntil, nextPolicy);
+		if (continuation == SchedulerCraftReforgeContinuation.WAIT) {
+			startSchedulerWaitAfterCraftReforge(client, scheduleWaitUntil);
+			return;
+		}
+		if (continuation != SchedulerCraftReforgeContinuation.APPLY_POLICY) {
 			return;
 		}
 		String triggerKey = handoffPolicyTriggerKey(client, nextPolicy.get());
@@ -1636,6 +1643,26 @@ public class AutoauctionClient implements ClientModInitializer {
 		pendingHandoffPolicyAction = new PendingHandoffPolicyAction(nextPolicy.get(), triggerKey);
 		sendRemoteClientLog("info", "Scheduler craft/reforge complete; continuing with action=" + nextPolicy.get().action() + ".");
 		pendingHandoffPolicyAction.tick(client);
+	}
+
+	private void startSchedulerWaitAfterCraftReforge(Minecraft client, long waitUntilEpochMs) {
+		if (waitUntilEpochMs <= System.currentTimeMillis()) {
+			return;
+		}
+		workflowStarted = false;
+		pendingHandoffPolicyStop = new PendingHandoffPolicyStop(waitUntilEpochMs);
+		disconnectIntentionally(client, "AutoAuction scheduler wait started after craft/reforge.");
+		sendRemoteClientLog("info", "Scheduler wait started after craft/reforge; reconnecting when the wait expires.");
+	}
+
+	private boolean schedulerListingCompletionAcknowledged(String currentUsername) {
+		if (handoffClient != null && handoffClient.markScheduleListingComplete(currentUsername)) {
+			return true;
+		}
+		sendRemoteClientLog("error",
+			"Alt Manager did not acknowledge scheduler listing completion; follow-up stopped to avoid desync.");
+		notifyIssueAsync("scheduler listing completion was not acknowledged for " + currentUsername + "; follow-up stopped.");
+		return false;
 	}
 
 	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
@@ -2643,6 +2670,28 @@ public class AutoauctionClient implements ClientModInitializer {
 			return true;
 		}
 		return !policyKey.equals(normalizeSchedulerCraftReforgeKey(suppressedKey));
+	}
+
+	static boolean schedulerCraftReforgeHasPreexistingEquippedArmor(EnumMap<ArmorPiece, ArmorSnapshot> armor) {
+		return armor != null && !armor.isEmpty();
+	}
+
+	static SchedulerCraftReforgeContinuation schedulerCraftReforgeContinuation(
+		long nowMs,
+		long waitUntilEpochMs,
+		Optional<HandoffPolicySnapshot> nextPolicy
+	) {
+		if (waitUntilEpochMs > nowMs) {
+			return SchedulerCraftReforgeContinuation.WAIT;
+		}
+		if (nextPolicy == null || nextPolicy.isEmpty()) {
+			return SchedulerCraftReforgeContinuation.NONE;
+		}
+		HandoffPolicySnapshot policy = nextPolicy.get();
+		if (!policy.schedulerPolicy() || policy.listArmor() || policy.craftReforgeArmor()) {
+			return SchedulerCraftReforgeContinuation.NONE;
+		}
+		return SchedulerCraftReforgeContinuation.APPLY_POLICY;
 	}
 
 	static long schedulerCraftReforgeSuppressedUntil(long nowMs) {
@@ -4441,6 +4490,11 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (finalDestinationCraftWorkflow != null) {
 				return;
 			}
+			EnumMap<ArmorPiece, ArmorSnapshot> equippedArmor = actions.readEquippedFinalDestinationArmor(client);
+			if (schedulerCraftReforgeHasPreexistingEquippedArmor(equippedArmor)) {
+				fail("scheduler craft/reforge expected listing flow to leave no equipped Final Destination armor.");
+				return;
+			}
 			finalDestinationCraftWorkflow = new FinalDestinationCraftWorkflow(
 				actions,
 				config.clickDelayMs(),
@@ -4478,7 +4532,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			actions.equipFinalDestinationArmorFromInventory(client);
 			if (actions.hasEquippedFinalDestinationArmorSet(client)) {
 				String current = currentUsername(client);
-				handoffClient.markScheduleCraftReforgeComplete(current);
+				if (handoffClient == null || !handoffClient.markScheduleCraftReforgeComplete(current)) {
+					fail("Alt Manager did not acknowledge scheduler craft/reforge completion.");
+					return;
+				}
 				transition(State.DONE);
 				pendingSchedulerCraftReforge = null;
 				sendRemoteClientLog("info", "Scheduler craft/reforge complete; new FD armor is equipped.");
@@ -4620,6 +4677,12 @@ public class AutoauctionClient implements ClientModInitializer {
 		private PendingHandoffPolicyStop(long reconnectAt) {
 			this.reconnectAt = reconnectAt;
 		}
+	}
+
+	enum SchedulerCraftReforgeContinuation {
+		NONE,
+		WAIT,
+		APPLY_POLICY
 	}
 
 	private enum RealAuctionState {
@@ -5047,7 +5110,12 @@ public class AutoauctionClient implements ClientModInitializer {
 					debug(client, "Disconnecting after listing workflow.");
 					if (shouldStayIslandAfterListing(postListingPolicy)) {
 						String current = currentUsername(client);
-						handoffClient.markScheduleListingComplete(current);
+						if (!schedulerListingCompletionAcknowledged(current)) {
+							transition(RealAuctionState.DONE, client);
+							realWorkflow = null;
+							workflowStarted = false;
+							return;
+						}
 						transition(RealAuctionState.DONE, client);
 						realWorkflow = null;
 						sendRemoteClientLog("info", "Listed armor; staying on island for scheduler craft/reforge.");
@@ -5062,7 +5130,12 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					String current = currentUsername(client);
 					String scheduledNext = handoffClient.nextScheduledAccount(current);
-					handoffClient.markScheduleListingComplete(current);
+					if (!schedulerListingCompletionAcknowledged(current)) {
+						transition(RealAuctionState.DONE, client);
+						realWorkflow = null;
+						workflowStarted = false;
+						return;
+					}
 					beginAccountHandoff(client, scheduledNext);
 					disconnectIntentionally(client, "AutoAuction finished listing.");
 					transition(RealAuctionState.DONE, client);

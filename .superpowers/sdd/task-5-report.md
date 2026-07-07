@@ -74,3 +74,26 @@ Result:
 
 Concerns:
 - Cooldown state is in-memory only. That matches the prior session-scoped behavior and the task request, but suppression does not survive a client restart.
+
+---
+
+Task 5 final-review scheduler bridge/wait fix:
+
+Files changed:
+- `src/client/java/com/autoauction/client/AutoauctionClient.java`
+- `src/test/java/com/autoauction/client/AutoauctionClientTest.java`
+- `.superpowers/sdd/task-5-report.md`
+
+Tests run:
+- RED: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest` failed at compile because the new scheduler continuation and pre-start FD guard helpers did not exist yet.
+- GREEN: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest` passed.
+- Final verification: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest --tests com.autoauction.client.minecraft.MinecraftGameActionsTest --tests com.autoauction.client.crafting.FinalDestinationCraftWorkflowTest --tests com.autoauction.client.reforge.ReforgeWorkflowTest` passed.
+
+Result:
+- Scheduler listing and scheduler craft/reforge now both require Alt Manager bridge acknowledgement before AutoAuction continues to the next step. If Alt Manager rejects the completion mark, AutoAuction logs/notifies and stops the follow-up instead of continuing in a desynchronized state.
+- After successful scheduler craft/reforge completion, AutoAuction now checks `currentScheduleWaitUntilEpochMs()`. If Alt Manager advanced into a future `WAIT`, AutoAuction disconnects intentionally, records `pendingHandoffPolicyStop`, and resumes only when the wait expires.
+- Scheduler craft/reforge now refuses to start if any Final Destination armor is still equipped. This matches the intended `LIST_ARMOR -> CRAFT_REFORGE_ARMOR` flow and prevents falsely accepting a pre-existing equipped FD set as newly crafted output.
+- Added focused helper coverage for scheduler craft/reforge continuation decisions and the pre-existing equipped FD guard.
+
+Concerns:
+- The new FD guard intentionally assumes the intended list-before-craft schedule shape. Direct standalone scheduler `CRAFT_REFORGE_ARMOR` without the listing flow will now fail fast if FD armor is still equipped, which matches the user clarification for this pass.
