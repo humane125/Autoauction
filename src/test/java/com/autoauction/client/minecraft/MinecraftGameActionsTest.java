@@ -60,4 +60,13 @@ class MinecraftGameActionsTest {
 		assertEquals("Final Destination Leggings", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.LEGGINGS));
 		assertEquals("Final Destination Boots", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.BOOTS));
 	}
+
+	@Test
+	void finalDestinationEquippedNameCheckRequiresMatchingPiece() {
+		assertTrue(MinecraftGameActions.isFinalDestinationArmorName(ArmorPiece.CHESTPLATE, "Fierce Final Destination Chestplate"));
+		assertTrue(MinecraftGameActions.isFinalDestinationArmorName(ArmorPiece.BOOTS, "Wise Final Destination Boots"));
+
+		assertFalse(MinecraftGameActions.isFinalDestinationArmorName(ArmorPiece.HELMET, "Fierce Final Destination Chestplate"));
+		assertFalse(MinecraftGameActions.isFinalDestinationArmorName(ArmorPiece.LEGGINGS, "Fierce Necron's Leggings"));
+	}
 }

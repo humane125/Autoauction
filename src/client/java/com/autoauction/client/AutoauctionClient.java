@@ -4370,7 +4370,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private void equip(Minecraft client) {
 			actions.equipFinalDestinationArmorFromInventory(client);
-			if (actions.equippedArmorCount(client) == ArmorPiece.values().length) {
+			if (actions.hasEquippedFinalDestinationArmorSet(client)) {
 				String current = currentUsername(client);
 				handoffClient.markScheduleCraftReforgeComplete(current);
 				transition(State.DONE);

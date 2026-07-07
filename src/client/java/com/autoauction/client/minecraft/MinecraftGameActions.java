@@ -168,6 +168,23 @@ public final class MinecraftGameActions {
 		return !client.player.getItemBySlot(toEquipmentSlot(piece)).isEmpty();
 	}
 
+	public boolean isFinalDestinationArmorEquipped(Minecraft client, ArmorPiece piece) {
+		if (client.player == null) {
+			return false;
+		}
+		ItemStack equipped = client.player.getItemBySlot(toEquipmentSlot(piece));
+		return !equipped.isEmpty() && isFinalDestinationArmorName(piece, equipped.getHoverName().getString());
+	}
+
+	public boolean hasEquippedFinalDestinationArmorSet(Minecraft client) {
+		for (ArmorPiece piece : ArmorPiece.values()) {
+			if (!isFinalDestinationArmorEquipped(client, piece)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	public static String finalDestinationBaseName(ArmorPiece piece) {
 		return switch (piece) {
 			case HELMET -> "Final Destination Helmet";
@@ -184,7 +201,7 @@ public final class MinecraftGameActions {
 		openInventory(client);
 		boolean movedAny = false;
 		for (ArmorPiece piece : ArmorPiece.values()) {
-			if (isArmorPieceEquipped(client, piece)) {
+			if (isFinalDestinationArmorEquipped(client, piece)) {
 				continue;
 			}
 			Optional<Integer> slot = findInventoryHandlerSlotByItemName(client, finalDestinationBaseName(piece), 1);
@@ -194,6 +211,10 @@ public final class MinecraftGameActions {
 			}
 		}
 		return movedAny;
+	}
+
+	static boolean isFinalDestinationArmorName(ArmorPiece piece, String itemName) {
+		return itemNameMatches(itemName, finalDestinationBaseName(piece));
 	}
 
 	public void quickMoveArmorPieceToInventory(Minecraft client, ArmorPiece piece) {
