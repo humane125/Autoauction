@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutoauctionClientTest {
 	@Test
@@ -232,6 +234,86 @@ class AutoauctionClientTest {
 		);
 
 		assertEquals("Fierce", AutoauctionClient.schedulerCraftReforge(policy));
+	}
+
+	@Test
+	void schedulerCraftReforgeSuppressionBlocksOnlyTheSameAccountPolicyAndReforge() {
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"trigger-a",
+			"Fierce",
+			"",
+			""
+		);
+		HandoffPolicySnapshot changedReforge = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"trigger-a",
+			"Ancient",
+			"",
+			""
+		);
+		HandoffPolicySnapshot changedPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"trigger-b",
+			"Fierce",
+			"",
+			""
+		);
+
+		String suppressedKey = AutoauctionClient.schedulerCraftReforgePolicyKey("MacroOne", policy);
+
+		assertFalse(AutoauctionClient.canStartSchedulerCraftReforge("macroone", policy, suppressedKey));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroTwo", policy, suppressedKey));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedReforge, suppressedKey));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedPolicy, suppressedKey));
+	}
+
+	@Test
+	void schedulerCraftReforgePolicyKeyFallsBackToSchedulerPolicyIdentityWithoutTriggerKey() {
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"",
+			"Fierce",
+			"",
+			""
+		);
+
+		assertEquals(
+			"macroone|uuid-one|short_rotation|25000|craft_reforge_armor|fierce",
+			AutoauctionClient.schedulerCraftReforgePolicyKey("MacroOne", policy)
+		);
 	}
 
 	@Test

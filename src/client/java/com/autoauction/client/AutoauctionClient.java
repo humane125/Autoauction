@@ -211,6 +211,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingHandoffPolicyAction pendingHandoffPolicyAction;
 	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
+	private String suppressedSchedulerCraftReforgeKey = "";
 
 	@Override
 	public void onInitializeClient() {
@@ -1565,14 +1566,28 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startSchedulerCraftReforge(Minecraft client, HandoffPolicySnapshot policy) {
-		startSchedulerCraftReforge(client, schedulerCraftReforge(policy));
+		String currentUsername = currentUsername(client);
+		String suppressionKey = schedulerCraftReforgePolicyKey(currentUsername, policy);
+		if (!canStartSchedulerCraftReforge(currentUsername, policy, suppressedSchedulerCraftReforgeKey)) {
+			sendRemoteDebugLog(
+				"info",
+				"handoff",
+				"Scheduler craft/reforge skipped because policy key is suppressed: " + suppressionKey + "."
+			);
+			return;
+		}
+		startSchedulerCraftReforge(client, schedulerCraftReforge(policy), suppressionKey);
 	}
 
 	private void startSchedulerCraftReforge(Minecraft client, String reforge) {
+		startSchedulerCraftReforge(client, reforge, "");
+	}
+
+	private void startSchedulerCraftReforge(Minecraft client, String reforge, String suppressionKey) {
 		if (pendingSchedulerCraftReforge != null) {
 			return;
 		}
-		pendingSchedulerCraftReforge = new PendingSchedulerCraftReforge(reforge);
+		pendingSchedulerCraftReforge = new PendingSchedulerCraftReforge(reforge, suppressionKey);
 		sendRemoteClientLog("info", "Scheduler craft/reforge started with " + reforge + ".");
 		pendingSchedulerCraftReforge.tick(client);
 	}
@@ -2594,13 +2609,67 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	static boolean sameMinecraftUsername(String left, String right) {
-		String cleanLeft = String.valueOf(left == null ? "" : left).trim();
-		String cleanRight = String.valueOf(right == null ? "" : right).trim();
-		return !cleanLeft.isBlank() && !cleanRight.isBlank() && cleanLeft.equalsIgnoreCase(cleanRight);
+		String cleanLeft = normalizedMinecraftUsername(left);
+		String cleanRight = normalizedMinecraftUsername(right);
+		return !cleanLeft.isBlank() && !cleanRight.isBlank() && cleanLeft.equals(cleanRight);
 	}
 
 	static boolean accountStatsBelongToCurrentUser(String statsUsername, String currentUsername) {
 		return sameMinecraftUsername(statsUsername, currentUsername);
+	}
+
+	static boolean canStartSchedulerCraftReforge(String currentUsername, HandoffPolicySnapshot policy, String suppressedKey) {
+		String policyKey = schedulerCraftReforgePolicyKey(currentUsername, policy);
+		if (policyKey.isBlank()) {
+			return true;
+		}
+		return !policyKey.equals(normalizeSchedulerCraftReforgeKey(suppressedKey));
+	}
+
+	static String schedulerCraftReforgePolicyKey(String currentUsername, HandoffPolicySnapshot policy) {
+		if (policy == null) {
+			return "";
+		}
+		String normalizedUser = normalizedMinecraftUsername(currentUsername);
+		if (normalizedUser.isBlank()) {
+			return "";
+		}
+		String policyKey = policy.triggerKey() == null || policy.triggerKey().isBlank()
+			? schedulerCraftReforgePolicyIdentity(policy)
+			: normalizeSchedulerCraftReforgeKey(policy.triggerKey());
+		if (policyKey.isBlank()) {
+			return "";
+		}
+		return normalizedUser + "|" + policyKey + "|" + normalizeSchedulerCraftReforgeKey(schedulerCraftReforge(policy));
+	}
+
+	private static String schedulerCraftReforgePolicyIdentity(HandoffPolicySnapshot policy) {
+		return normalizeSchedulerCraftReforgeKey(
+			policy.uuid() + "|" + policy.phase() + "|" + policy.killLimit() + "|" + policy.action()
+		);
+	}
+
+	private static String normalizedMinecraftUsername(String username) {
+		return String.valueOf(username == null ? "" : username).trim().toLowerCase(Locale.ROOT);
+	}
+
+	private static String normalizeSchedulerCraftReforgeKey(String key) {
+		return String.valueOf(key == null ? "" : key).trim().toLowerCase(Locale.ROOT);
+	}
+
+	private void suppressActiveSchedulerCraftReforgeRetry() {
+		if (pendingSchedulerCraftReforge == null) {
+			return;
+		}
+		suppressSchedulerCraftReforgeRetry(pendingSchedulerCraftReforge.suppressionKey());
+	}
+
+	private void suppressSchedulerCraftReforgeRetry(String suppressionKey) {
+		String normalizedKey = normalizeSchedulerCraftReforgeKey(suppressionKey);
+		if (normalizedKey.isBlank()) {
+			return;
+		}
+		suppressedSchedulerCraftReforgeKey = normalizedKey;
 	}
 
 	private void clearAccountStatsCache() {
@@ -2831,11 +2900,14 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void cancelAutomation(Minecraft client, String reason) {
+		suppressActiveSchedulerCraftReforgeRetry();
 		realWorkflow = null;
+		finalDestinationCraftWorkflow = null;
 		pendingReforgePlan = null;
 		routeReforgeWorkflow = null;
 		reforgeWorkflow = null;
 		pendingSchedulerCraftReforge = null;
+		timeBasedRotation.stop();
 		workflowStarted = false;
 		controller.stop();
 		Autoauction.LOGGER.warn("AutoAuction cancelled: {}", reason);
@@ -4312,11 +4384,13 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private final class PendingSchedulerCraftReforge {
 		private final String reforge;
+		private final String suppressionKey;
 		private State state = State.START_CRAFT;
 		private long stateStartedAt;
 
-		private PendingSchedulerCraftReforge(String reforge) {
+		private PendingSchedulerCraftReforge(String reforge, String suppressionKey) {
 			this.reforge = reforge == null || reforge.isBlank() ? "Fierce" : reforge;
+			this.suppressionKey = normalizeSchedulerCraftReforgeKey(suppressionKey);
 		}
 
 		private void tick(Minecraft client) {
@@ -4386,9 +4460,14 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private void fail(String message) {
 			transition(State.ERROR);
+			suppressSchedulerCraftReforgeRetry(suppressionKey);
 			pendingSchedulerCraftReforge = null;
 			sendRemoteClientLog("error", "Scheduler craft/reforge failed: " + message);
 			notifyIssueAsync("scheduler craft/reforge failed: " + message);
+		}
+
+		private String suppressionKey() {
+			return suppressionKey;
 		}
 
 		private void transition(State next) {
