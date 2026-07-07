@@ -237,7 +237,7 @@ class AutoauctionClientTest {
 	}
 
 	@Test
-	void schedulerCraftReforgeSuppressionBlocksOnlyTheSameAccountPolicyAndReforge() {
+	void schedulerCraftReforgeSuppressionBlocksOnlyTheSameAccountPolicyAndReforgeDuringCooldown() {
 		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
 			"Macro",
 			"uuid-one",
@@ -285,11 +285,38 @@ class AutoauctionClientTest {
 		);
 
 		String suppressedKey = AutoauctionClient.schedulerCraftReforgePolicyKey("MacroOne", policy);
+		long suppressedUntilMs = AutoauctionClient.schedulerCraftReforgeSuppressedUntil(10_000L);
 
-		assertFalse(AutoauctionClient.canStartSchedulerCraftReforge("macroone", policy, suppressedKey));
-		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroTwo", policy, suppressedKey));
-		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedReforge, suppressedKey));
-		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedPolicy, suppressedKey));
+		assertFalse(AutoauctionClient.canStartSchedulerCraftReforge("macroone", policy, suppressedKey, suppressedUntilMs, 10_001L));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroTwo", policy, suppressedKey, suppressedUntilMs, 10_001L));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedReforge, suppressedKey, suppressedUntilMs, 10_001L));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", changedPolicy, suppressedKey, suppressedUntilMs, 10_001L));
+	}
+
+	@Test
+	void schedulerCraftReforgeSuppressionExpiresAfterCooldown() {
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"trigger-a",
+			"Fierce",
+			"",
+			""
+		);
+
+		String suppressedKey = AutoauctionClient.schedulerCraftReforgePolicyKey("MacroOne", policy);
+		long suppressedAtMs = 100_000L;
+		long suppressedUntilMs = AutoauctionClient.schedulerCraftReforgeSuppressedUntil(suppressedAtMs);
+
+		assertFalse(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", policy, suppressedKey, suppressedUntilMs, suppressedUntilMs - 1L));
+		assertTrue(AutoauctionClient.canStartSchedulerCraftReforge("MacroOne", policy, suppressedKey, suppressedUntilMs, suppressedUntilMs));
 	}
 
 	@Test

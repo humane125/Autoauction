@@ -132,6 +132,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final int NEBULA_LATEST_LOG_POLL_INTERVAL_TICKS = 1;
 	private static final int ACCOUNT_STATS_POLL_TICKS = 20;
 	private static final long ACCOUNT_STATS_SEND_INTERVAL_MS = 30_000L;
+	private static final long SCHEDULER_CRAFT_REFORGE_SUPPRESSION_COOLDOWN_MS = 30_000L;
 	private static final long NEBULA_STATUS_RESULT_KEY_EDGE_WINDOW_MS = 250L;
 	private static final long HANDOFF_POLICY_RECONNECT_GRACE_MS = 5_000L;
 	private static final int EC_STORAGE_FIRST_SLOT = 9;
@@ -212,6 +213,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 	private String suppressedSchedulerCraftReforgeKey = "";
+	private long suppressedSchedulerCraftReforgeUntilMs;
 
 	@Override
 	public void onInitializeClient() {
@@ -1568,7 +1570,15 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void startSchedulerCraftReforge(Minecraft client, HandoffPolicySnapshot policy) {
 		String currentUsername = currentUsername(client);
 		String suppressionKey = schedulerCraftReforgePolicyKey(currentUsername, policy);
-		if (!canStartSchedulerCraftReforge(currentUsername, policy, suppressedSchedulerCraftReforgeKey)) {
+		long nowMs = System.currentTimeMillis();
+		clearExpiredSchedulerCraftReforgeSuppression(nowMs);
+		if (!canStartSchedulerCraftReforge(
+			currentUsername,
+			policy,
+			suppressedSchedulerCraftReforgeKey,
+			suppressedSchedulerCraftReforgeUntilMs,
+			nowMs
+		)) {
 			sendRemoteDebugLog(
 				"info",
 				"handoff",
@@ -2618,12 +2628,25 @@ public class AutoauctionClient implements ClientModInitializer {
 		return sameMinecraftUsername(statsUsername, currentUsername);
 	}
 
-	static boolean canStartSchedulerCraftReforge(String currentUsername, HandoffPolicySnapshot policy, String suppressedKey) {
+	static boolean canStartSchedulerCraftReforge(
+		String currentUsername,
+		HandoffPolicySnapshot policy,
+		String suppressedKey,
+		long suppressedUntilMs,
+		long nowMs
+	) {
 		String policyKey = schedulerCraftReforgePolicyKey(currentUsername, policy);
 		if (policyKey.isBlank()) {
 			return true;
 		}
+		if (nowMs >= suppressedUntilMs) {
+			return true;
+		}
 		return !policyKey.equals(normalizeSchedulerCraftReforgeKey(suppressedKey));
+	}
+
+	static long schedulerCraftReforgeSuppressedUntil(long nowMs) {
+		return nowMs + SCHEDULER_CRAFT_REFORGE_SUPPRESSION_COOLDOWN_MS;
 	}
 
 	static String schedulerCraftReforgePolicyKey(String currentUsername, HandoffPolicySnapshot policy) {
@@ -2670,6 +2693,15 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		suppressedSchedulerCraftReforgeKey = normalizedKey;
+		suppressedSchedulerCraftReforgeUntilMs = schedulerCraftReforgeSuppressedUntil(System.currentTimeMillis());
+	}
+
+	private void clearExpiredSchedulerCraftReforgeSuppression(long nowMs) {
+		if (suppressedSchedulerCraftReforgeUntilMs == 0L || nowMs < suppressedSchedulerCraftReforgeUntilMs) {
+			return;
+		}
+		suppressedSchedulerCraftReforgeKey = "";
+		suppressedSchedulerCraftReforgeUntilMs = 0L;
 	}
 
 	private void clearAccountStatsCache() {

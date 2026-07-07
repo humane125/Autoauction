@@ -35,8 +35,6 @@ Fix follow-up:
 Fix tests:
 - `.\gradlew.bat --no-daemon test --tests com.autoauction.client.minecraft.MinecraftGameActionsTest --tests com.autoauction.client.AutoauctionClientTest --tests com.autoauction.client.crafting.FinalDestinationCraftWorkflowTest --tests com.autoauction.client.reforge.ReforgeWorkflowTest` passed.
 
----
-
 Task 5 reviewer fix follow-up:
 
 Files changed:
@@ -53,3 +51,26 @@ Result:
 - `cancelAutomation()` now clears `finalDestinationCraftWorkflow` along with the scheduler route/reforge fields, suppresses the active scheduler craft/reforge retry key before teardown, and stops time-based rotation so F9 actually halts the in-flight scheduler craft/reforge chain.
 - Scheduler craft/reforge failure or cancellation now suppresses only the matching scheduler policy/reforge/current-account key, which prevents immediate auto-retry on the next handoff-policy poll while leaving manual `/autoauction craftfd` and `/autoauction reforge` behavior unchanged.
 - Added focused tests for the suppression-key behavior used by the cancel/fail no-retry path.
+
+---
+
+Task 5 re-review cooldown fix:
+
+Files changed:
+- `src/client/java/com/autoauction/client/AutoauctionClient.java`
+- `src/test/java/com/autoauction/client/AutoauctionClientTest.java`
+- `.superpowers/sdd/task-5-report.md`
+
+Tests run:
+- RED: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest` failed at compile because cooldown-aware scheduler suppression helpers did not exist yet.
+- GREEN: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest` passed.
+- Final verification: `.\gradlew.bat --no-daemon test --tests com.autoauction.client.AutoauctionClientTest --tests com.autoauction.client.minecraft.MinecraftGameActionsTest --tests com.autoauction.client.crafting.FinalDestinationCraftWorkflowTest --tests com.autoauction.client.reforge.ReforgeWorkflowTest` passed.
+
+Result:
+- Scheduler craft/reforge suppression now uses the existing policy/reforge/account key plus a 30 second expiry instead of a permanent session-long block.
+- Failed or F9-cancelled scheduler craft/reforge still skips the immediate next handoff-policy poll, but the same policy can run again after the cooldown elapses.
+- Trigger-key, account, or reforge changes still bypass suppression immediately because the matching key changes.
+- Manual craft/reforge commands remain unaffected because they do not provide a scheduler suppression key.
+
+Concerns:
+- Cooldown state is in-memory only. That matches the prior session-scoped behavior and the task request, but suppression does not survive a client restart.
