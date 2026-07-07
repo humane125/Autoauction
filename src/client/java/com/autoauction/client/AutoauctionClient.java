@@ -30,6 +30,7 @@ import com.autoauction.client.macro.NebulaGuiInputTracker;
 import com.autoauction.client.macro.NebulaLatestLogWatcher;
 import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.macro.NebulaMacroToggleKey;
+import com.autoauction.client.minecraft.BadConnectionReconnectController;
 import com.autoauction.client.minecraft.MinecraftGameActions;
 import com.autoauction.client.notify.DiscordNotifier;
 import com.autoauction.client.reforge.ReforgeTargetPlan;
@@ -109,6 +110,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.stream.StreamSupport;
 
@@ -162,6 +164,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final MacroStuckRecoveryController macroStuckRecoveryController = new MacroStuckRecoveryController();
 	private final LobbyCollisionController lobbyCollisionController = new LobbyCollisionController();
 	private final HandoffPolicyWatcher handoffPolicyWatcher = new HandoffPolicyWatcher();
+	private final BadConnectionReconnectController badConnectionReconnectController = new BadConnectionReconnectController();
 	private final AuctionItemRequestFactory requestFactory = new AuctionItemRequestFactory();
 	private final TimeBasedRotation timeBasedRotation = new TimeBasedRotation();
 	private int tickCounter;
@@ -246,6 +249,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			ClientTickEvents.END_CLIENT_TICK.register(client -> {
 				startModSocketIfNeeded(client);
 				reportConnectionStatus(client);
+				handlePendingBadConnectionReconnect(client);
 				pollNebulaLatestLog();
 				handlePendingHandoff(client);
 				handlePendingHandoffPolicyStop(client);
@@ -344,6 +348,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void registerConnectionStatusHandlers() {
 		ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			badConnectionReconnectController.clearPendingReconnect();
 			ServerData serverData = handler.getServerData();
 			if (serverData != null && ModAccountStatusDetector.isHypixelServer(serverData.ip)) {
 				reportModStatus("hypixel", "play join " + serverData.ip);
@@ -353,14 +358,64 @@ public class AutoauctionClient implements ClientModInitializer {
 			DisconnectionDetails details = disconnectionDetailsFrom(handler);
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
 				reportModBanStatus(details, "login disconnect");
+				return;
 			}
+			handleConnectionDisconnect(client, details, "login disconnect");
 		});
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			DisconnectionDetails details = connectionDisconnectionDetails(handler.getConnection());
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
 				reportModBanStatus(details, "play disconnect");
+				return;
 			}
+			handleConnectionDisconnect(client, details, "play disconnect");
 		});
+	}
+
+	private void handleConnectionDisconnect(Minecraft client, DisconnectionDetails details, String source) {
+		sendDisconnectedAccountStats();
+		reportModStatus("active", source);
+		String reason = disconnectionReason(details);
+		long now = System.currentTimeMillis();
+		boolean scheduled = badConnectionReconnectController.scheduleIfBadConnection(
+			reason,
+			false,
+			now,
+			() -> ThreadLocalRandom.current().nextLong(
+				BadConnectionReconnectController.MIN_RECONNECT_DELAY_MS,
+				BadConnectionReconnectController.MAX_RECONNECT_DELAY_MS + 1L
+			)
+		);
+		if (scheduled) {
+			long delaySeconds = Math.max(1L, (badConnectionReconnectController.pendingReconnectAt() - now + 999L) / 1_000L);
+			sendRemoteClientLog("warn", "Disconnected from Hypixel after a bad connection; reconnecting in " + delaySeconds + "s.");
+			Autoauction.LOGGER.info(
+				"AutoAuction scheduled bad-connection reconnect in {}s after {}: {}",
+				delaySeconds,
+				source,
+				reason
+			);
+		}
+	}
+
+	private String disconnectionReason(DisconnectionDetails details) {
+		return details == null || details.reason() == null ? "" : details.reason().getString();
+	}
+
+	private void handlePendingBadConnectionReconnect(Minecraft client) {
+		if (!badConnectionReconnectController.hasPendingReconnect()) {
+			return;
+		}
+		if (client.getConnection() != null || client.player != null) {
+			badConnectionReconnectController.clearPendingReconnect();
+			return;
+		}
+		if (!badConnectionReconnectController.reconnectDue(System.currentTimeMillis())) {
+			return;
+		}
+		badConnectionReconnectController.clearPendingReconnect();
+		actions.connectToServer(client, "mc.hypixel.net");
+		sendRemoteClientLog("info", "Auto reconnecting to Hypixel after bad connection.");
 	}
 
 	private void reportModStatus(String status, String source) {
@@ -397,7 +452,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			: reason;
 		client.execute(() -> {
 			if (actions != null) {
-				actions.disconnect(client, disconnectReason);
+				disconnectIntentionally(client, disconnectReason);
 			}
 		});
 	}
@@ -462,13 +517,20 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void disconnectServerFromRemote(Minecraft client) {
-		actions.disconnect(client, "AutoAuction remote disconnect requested.");
+		disconnectIntentionally(client, "AutoAuction remote disconnect requested.");
 		sendRemoteClientLog("info", "Remote server disconnect requested.");
 	}
 
 	private void reconnectHypixelFromRemote(Minecraft client) {
+		badConnectionReconnectController.clearPendingReconnect();
 		actions.connectToServer(client, "mc.hypixel.net");
 		sendRemoteClientLog("info", "Remote Hypixel reconnect requested.");
+	}
+
+	private void disconnectIntentionally(Minecraft client, String reason) {
+		badConnectionReconnectController.suppressIntentionalDisconnects(System.currentTimeMillis());
+		sendDisconnectedAccountStats();
+		actions.disconnect(client, reason);
 	}
 
 	private void closeInstanceFromRemote(Minecraft client) {
@@ -1386,6 +1448,25 @@ public class AutoauctionClient implements ClientModInitializer {
 	private void forceFlushLatestAccountStats() {
 		if (modSocketClient != null && latestAccountStatsSnapshot != null) {
 			modSocketClient.forceSendAccountStats(latestAccountStatsSnapshot);
+		}
+	}
+
+	private void sendDisconnectedAccountStats() {
+		if (modSocketClient == null || latestAccountStatsSnapshot == null) {
+			return;
+		}
+		AccountStatsSnapshot disconnected = new AccountStatsSnapshot(
+			latestAccountStatsSnapshot.purse(),
+			latestAccountStatsSnapshot.helmetKills(),
+			latestAccountStatsSnapshot.chestplateKills(),
+			latestAccountStatsSnapshot.leggingsKills(),
+			latestAccountStatsSnapshot.bootsKills(),
+			false
+		);
+		if (modSocketClient.forceSendAccountStats(disconnected)) {
+			latestAccountStatsSnapshot = disconnected;
+			lastSentAccountStats = disconnected;
+			lastSentAccountStatsAt = System.currentTimeMillis();
 		}
 	}
 
@@ -2729,7 +2810,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (policy.nextAccount()) {
 			beginAccountHandoff(client, policy);
 			if (pendingHandoff != null) {
-				actions.disconnect(client, "AutoAuction listed armor and switched accounts.");
+				disconnectIntentionally(client, "AutoAuction listed armor and switched accounts.");
 				sendRemoteClientLog("info", "Listed armor; handoff policy switched to next Alt Manager account.");
 			}
 			return true;
@@ -2738,12 +2819,12 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (policy.stopForHours()) {
 			long delayMs = Math.max(0L, policy.stopHours()) * 60L * 60L * 1000L;
 			pendingHandoffPolicyStop = new PendingHandoffPolicyStop(System.currentTimeMillis() + delayMs);
-			actions.disconnect(client, "AutoAuction listed armor and started handoff stop timer.");
+			disconnectIntentionally(client, "AutoAuction listed armor and started handoff stop timer.");
 			sendRemoteClientLog("info", "Listed armor; handoff policy stopped macro for " + policy.stopHours() + " hour(s).");
 			return true;
 		}
 
-		actions.disconnect(client, "AutoAuction listed armor and disconnected.");
+		disconnectIntentionally(client, "AutoAuction listed armor and disconnected.");
 		sendRemoteClientLog("info", "Listed armor; handoff policy disconnected and is waiting for manual action.");
 		return true;
 	}
@@ -4192,7 +4273,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (policy.nextAccount()) {
 				beginAccountHandoff(client, policy);
 				if (pendingHandoff != null) {
-					actions.disconnect(client, "AutoAuction handoff policy switched accounts.");
+					disconnectIntentionally(client, "AutoAuction handoff policy switched accounts.");
 					sendRemoteClientLog("info", "Handoff policy switched to next Alt Manager account.");
 					handoffPolicyTriggerGuard.complete(triggerKey);
 				} else {
@@ -4205,14 +4286,14 @@ public class AutoauctionClient implements ClientModInitializer {
 			if (policy.stopForHours()) {
 				long delayMs = Math.max(0L, policy.stopHours()) * 60L * 60L * 1000L;
 				pendingHandoffPolicyStop = new PendingHandoffPolicyStop(System.currentTimeMillis() + delayMs);
-				actions.disconnect(client, "AutoAuction handoff policy stop timer started.");
+				disconnectIntentionally(client, "AutoAuction handoff policy stop timer started.");
 				sendRemoteClientLog("info", "Handoff policy stopped macro for " + policy.stopHours() + " hour(s).");
 				handoffPolicyTriggerGuard.complete(triggerKey);
 				pendingHandoffPolicyAction = null;
 				return;
 			}
 
-			actions.disconnect(client, "AutoAuction handoff policy disconnect-and-wait.");
+			disconnectIntentionally(client, "AutoAuction handoff policy disconnect-and-wait.");
 			sendRemoteClientLog("info", "Handoff policy disconnected and is waiting for manual action.");
 			handoffPolicyTriggerGuard.complete(triggerKey);
 			pendingHandoffPolicyAction = null;
@@ -4664,7 +4745,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					String scheduledNext = handoffClient.nextScheduledAccount(current);
 					handoffClient.markScheduleListingComplete(current);
 					beginAccountHandoff(client, scheduledNext);
-					actions.disconnect(client, "AutoAuction finished listing.");
+					disconnectIntentionally(client, "AutoAuction finished listing.");
 					transition(RealAuctionState.DONE, client);
 					realWorkflow = null;
 					notifyInfoAsync("real auction workflow finished; account handoff requested.");
