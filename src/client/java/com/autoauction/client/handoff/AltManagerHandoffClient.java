@@ -127,6 +127,10 @@ public final class AltManagerHandoffClient {
 		return booleanScheduleCall("markScheduleListingComplete", uuidOrName);
 	}
 
+	public boolean markScheduleCraftReforgeComplete(String uuidOrName) {
+		return booleanScheduleCall("markScheduleCraftReforgeComplete", uuidOrName);
+	}
+
 	public long currentScheduleWaitUntilEpochMs() {
 		try {
 			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
@@ -215,7 +219,10 @@ public final class AltManagerHandoffClient {
 			optionalBooleanRecordValue(policy, "finalListing"),
 			optionalStringRecordValue(policy, "nextAccount"),
 			optionalBooleanRecordValue(policy, "waitAfterHandoff"),
-			optionalStringRecordValue(policy, "triggerKey")
+			optionalStringRecordValue(policy, "triggerKey"),
+			optionalStringRecordValue(policy, "reforge"),
+			optionalStringRecordValue(policy, "followUpAction"),
+			optionalStringRecordValue(policy, "followUpReforge")
 		);
 	}
 

@@ -4,7 +4,13 @@ public final class HandoffPolicyWatcher {
 	public static final int ARMOR_LISTING_KILL_LIMIT = 25_000;
 
 	public Decision decide(int lowestFinalDestinationKills, HandoffPolicySnapshot policy) {
-		if (policy == null || lowestFinalDestinationKills < policy.killLimit()) {
+		if (policy == null) {
+			return Decision.NONE;
+		}
+		if (policy.schedulerPolicy() && policy.craftReforgeArmor()) {
+			return Decision.CRAFT_REFORGE_ARMOR;
+		}
+		if (lowestFinalDestinationKills < policy.killLimit()) {
 			return Decision.NONE;
 		}
 		if (policy.schedulerPolicy()) {
@@ -25,6 +31,7 @@ public final class HandoffPolicyWatcher {
 	public enum Decision {
 		NONE,
 		NON_LISTING_HANDOFF,
-		LIST_ARMOR
+		LIST_ARMOR,
+		CRAFT_REFORGE_ARMOR
 	}
 }

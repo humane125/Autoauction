@@ -93,4 +93,48 @@ class HandoffPolicyWatcherTest {
 		assertEquals(HandoffPolicyWatcher.Decision.NONE, watcher.decide(29_999, policy));
 		assertEquals(HandoffPolicyWatcher.Decision.LIST_ARMOR, watcher.decide(30_000, policy));
 	}
+
+	@Test
+	void schedulerCraftReforgeRunsAsImmediateAction() {
+		HandoffPolicyWatcher watcher = new HandoffPolicyWatcher();
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"trigger",
+			"Fierce",
+			"",
+			""
+		);
+
+		assertEquals(HandoffPolicyWatcher.Decision.CRAFT_REFORGE_ARMOR, watcher.decide(0, policy));
+	}
+
+	@Test
+	void listArmorPolicyCanExposeCraftReforgeFollowUp() {
+		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"LIST_ARMOR",
+			0,
+			"FINAL_LISTING",
+			true,
+			"uuid-two",
+			false,
+			"trigger",
+			"",
+			"CRAFT_REFORGE_ARMOR",
+			"Wise"
+		);
+
+		assertEquals(true, policy.followUpCraftReforgeArmor());
+		assertEquals("Wise", policy.followUpReforge());
+	}
 }

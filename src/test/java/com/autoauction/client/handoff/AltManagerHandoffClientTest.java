@@ -18,6 +18,7 @@ class AltManagerHandoffClientTest {
 		FakeScheduleBridge.policy = Optional.empty();
 		FakeScheduleBridge.handoffMarked = false;
 		FakeScheduleBridge.listingMarked = false;
+		FakeScheduleBridge.craftReforgeMarked = false;
 		FakeScheduleBridge.waitUntil = 0L;
 		FakeScheduleBridge.nextScheduledAccount = "";
 		FakeScheduleBridge.scheduleEnabled = false;
@@ -112,6 +113,37 @@ class AltManagerHandoffClientTest {
 	}
 
 	@Test
+	void readsSchedulerCraftReforgePolicyFieldsByReflection() {
+		FakeScheduleBridge.policy = Optional.of(new FakeSchedulePolicy(
+			"Scheduled",
+			"scheduler-uuid",
+			1,
+			"CRAFT_REFORGE_ARMOR",
+			0,
+			"SHORT_ROTATION",
+			false,
+			"",
+			false,
+			"schedule-key-2",
+			"Wise",
+			"LIST_ARMOR",
+			"Fierce"
+		));
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		Optional<HandoffPolicySnapshot> policy = client.currentHandoffPolicy();
+
+		assertTrue(policy.isPresent());
+		assertEquals(true, policy.get().craftReforgeArmor());
+		assertEquals("Wise", policy.get().craftReforge());
+		assertEquals("LIST_ARMOR", policy.get().followUpAction());
+		assertEquals("Fierce", policy.get().followUpReforge());
+	}
+
+	@Test
 	void fallsBackToManualPolicyWhenSchedulerPolicyIsEmpty() {
 		FakeAccountSwitcher.policy = Optional.of(new FakePolicy("Manual", "manual-uuid", 20_000, "NEXT_ACCOUNT", 0));
 		AltManagerHandoffClient client = new AltManagerHandoffClient(
@@ -139,11 +171,13 @@ class AltManagerHandoffClientTest {
 
 		assertTrue(client.markScheduleHandoffComplete("Old", "ScheduledPlayer"));
 		assertTrue(client.markScheduleListingComplete("ScheduledPlayer"));
+		assertTrue(client.markScheduleCraftReforgeComplete("ScheduledPlayer"));
 		assertEquals(123_456L, client.currentScheduleWaitUntilEpochMs());
 		assertEquals("scheduled-uuid", client.nextScheduledAccount("Old"));
 		assertEquals(true, client.currentScheduleEnabled());
 		assertTrue(FakeScheduleBridge.handoffMarked);
 		assertTrue(FakeScheduleBridge.listingMarked);
+		assertTrue(FakeScheduleBridge.craftReforgeMarked);
 	}
 
 	public static final class FakeAccountSwitcher {
@@ -184,6 +218,7 @@ class AltManagerHandoffClientTest {
 		private static Optional<FakeSchedulePolicy> policy = Optional.empty();
 		private static boolean handoffMarked;
 		private static boolean listingMarked;
+		private static boolean craftReforgeMarked;
 		private static long waitUntil;
 		private static String nextScheduledAccount = "";
 		private static boolean scheduleEnabled;
@@ -200,6 +235,11 @@ class AltManagerHandoffClientTest {
 		public static boolean markScheduleListingComplete(String uuidOrName) {
 			listingMarked = "ScheduledPlayer".equals(uuidOrName);
 			return listingMarked;
+		}
+
+		public static boolean markScheduleCraftReforgeComplete(String uuidOrName) {
+			craftReforgeMarked = "ScheduledPlayer".equals(uuidOrName);
+			return craftReforgeMarked;
 		}
 
 		public static long currentScheduleWaitUntilEpochMs() {
@@ -231,7 +271,25 @@ class AltManagerHandoffClientTest {
 		boolean finalListing,
 		String nextAccount,
 		boolean waitAfterHandoff,
-		String triggerKey
+		String triggerKey,
+		String reforge,
+		String followUpAction,
+		String followUpReforge
 	) {
+		public FakeSchedulePolicy(
+			String username,
+			String uuid,
+			int killLimit,
+			String action,
+			int stopHours,
+			String phase,
+			boolean finalListing,
+			String nextAccount,
+			boolean waitAfterHandoff,
+			String triggerKey
+		) {
+			this(username, uuid, killLimit, action, stopHours, phase, finalListing, nextAccount, waitAfterHandoff,
+				triggerKey, "", "", "");
+		}
 	}
 }
