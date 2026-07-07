@@ -1,5 +1,6 @@
 package com.autoauction.client.minecraft;
 
+import com.autoauction.client.domain.ArmorPiece;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,5 +51,13 @@ class MinecraftGameActionsTest {
 		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Absolute Ender Pearl", "ender pearl"));
 		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Enchanted Ender Pearl", "ender pearl"));
 		assertFalse(MinecraftGameActions.itemNameExactlyMatches("Tessellated Ender Pearl", "ender pearl"));
+	}
+
+	@Test
+	void finalDestinationBaseNameForEquipMatchesArmorPieces() {
+		assertEquals("Final Destination Helmet", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.HELMET));
+		assertEquals("Final Destination Chestplate", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.CHESTPLATE));
+		assertEquals("Final Destination Leggings", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.LEGGINGS));
+		assertEquals("Final Destination Boots", MinecraftGameActions.finalDestinationBaseName(ArmorPiece.BOOTS));
 	}
 }

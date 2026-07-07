@@ -199,7 +199,6 @@ public final class ReforgeWorkflow {
 	private void fail(String message) {
 		state = State.ERROR;
 		errorHandler.accept(message);
-		finishHandler.run();
 	}
 
 	private enum State {

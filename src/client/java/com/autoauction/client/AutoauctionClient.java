@@ -198,6 +198,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ReforgeTargetPlan.Plan pendingReforgePlan;
 	private RouteReforgeWorkflow routeReforgeWorkflow;
 	private ReforgeWorkflow reforgeWorkflow;
+	private PendingSchedulerCraftReforge pendingSchedulerCraftReforge;
 	private PendingTransferFill pendingTransferFill;
 	private PendingTransferSellFill pendingTransferSellFill;
 	private TransferLoopGoal transferLoopGoal;
@@ -296,6 +297,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (reforgeWorkflow != null) {
 					reforgeWorkflow.tick(client);
+				}
+				if (pendingSchedulerCraftReforge != null) {
+					pendingSchedulerCraftReforge.tick(client);
 				}
 				tickCounter++;
 				boolean schedulerEnabled = handoffClient != null && handoffClient.currentScheduleEnabled();
@@ -1507,6 +1511,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			);
 			return;
 		}
+		if (decision == HandoffPolicyWatcher.Decision.CRAFT_REFORGE_ARMOR) {
+			startSchedulerCraftReforge(client, policy.get());
+			return;
+		}
 		if (decision != HandoffPolicyWatcher.Decision.NON_LISTING_HANDOFF) {
 			return;
 		}
@@ -1544,14 +1552,65 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
+			|| finalDestinationCraftWorkflow != null
 			|| routeReforgeWorkflow != null
 			|| reforgeWorkflow != null
+			|| pendingSchedulerCraftReforge != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null
 			|| pendingHandoff != null
 			|| pendingHandoffPolicyStop != null
 			|| !handoffPolicyCanRun(controller.state(), latestAccountStatsSnapshot);
+	}
+
+	private void startSchedulerCraftReforge(Minecraft client, HandoffPolicySnapshot policy) {
+		startSchedulerCraftReforge(client, schedulerCraftReforge(policy));
+	}
+
+	private void startSchedulerCraftReforge(Minecraft client, String reforge) {
+		if (pendingSchedulerCraftReforge != null) {
+			return;
+		}
+		pendingSchedulerCraftReforge = new PendingSchedulerCraftReforge(reforge);
+		sendRemoteClientLog("info", "Scheduler craft/reforge started with " + reforge + ".");
+		pendingSchedulerCraftReforge.tick(client);
+	}
+
+	private void continueSchedulerAfterListing(Minecraft client, HandoffPolicySnapshot completedPolicy) {
+		if (handoffClient == null || handoffPolicyWatcher == null) {
+			return;
+		}
+		Optional<HandoffPolicySnapshot> nextPolicy = handoffClient.currentHandoffPolicy();
+		if (nextPolicy.isEmpty()) {
+			startSchedulerCraftReforge(client, completedPolicy.followUpReforge());
+			return;
+		}
+		HandoffPolicyWatcher.Decision decision = handoffPolicyWatcher.decide(0, nextPolicy.get());
+		if (decision == HandoffPolicyWatcher.Decision.CRAFT_REFORGE_ARMOR) {
+			startSchedulerCraftReforge(client, nextPolicy.get());
+			return;
+		}
+		startSchedulerCraftReforge(client, completedPolicy.followUpReforge());
+	}
+
+	private void continueSchedulerAfterCraftReforge(Minecraft client) {
+		if (handoffClient == null) {
+			return;
+		}
+		Optional<HandoffPolicySnapshot> nextPolicy = handoffClient.currentHandoffPolicy();
+		if (nextPolicy.isEmpty() || !nextPolicy.get().schedulerPolicy() || nextPolicy.get().listArmor() || nextPolicy.get().craftReforgeArmor()) {
+			return;
+		}
+		String triggerKey = handoffPolicyTriggerKey(client, nextPolicy.get());
+		if (!handoffPolicyTriggerGuard.start(triggerKey)) {
+			sendRemoteDebugLog("info", "handoff",
+				"Scheduler continuation skipped because it already ran for key " + triggerKey + ".");
+			return;
+		}
+		pendingHandoffPolicyAction = new PendingHandoffPolicyAction(nextPolicy.get(), triggerKey);
+		sendRemoteClientLog("info", "Scheduler craft/reforge complete; continuing with action=" + nextPolicy.get().action() + ".");
+		pendingHandoffPolicyAction.tick(client);
 	}
 
 	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
@@ -1784,6 +1843,7 @@ public class AutoauctionClient implements ClientModInitializer {
 					message -> {
 						Autoauction.LOGGER.error("AutoAuction FD crafter failed: {}", message);
 						sendClientFeedback(client, "AutoAuction FD crafter failed: " + message);
+						finalDestinationCraftWorkflow = null;
 						notifyIssueAsync("FD crafter failed: " + message);
 					},
 					() -> finalDestinationCraftWorkflow = null
@@ -1966,10 +2026,19 @@ public class AutoauctionClient implements ClientModInitializer {
 			return 0;
 		}
 		Minecraft client = source.getClient();
-		routeReforgeWorkflow = new RouteReforgeWorkflow(plan.get());
-		routeReforgeWorkflow.start(client);
+		startRouteReforgeWorkflow(client, plan.get(), () -> {}, message -> notifyIssueAsync("route reforge failed: " + message));
 		sendFeedback(source, "AutoAuction route reforge started for " + plan.get().name() + " -> " + plan.get().reforge() + ".");
 		return 1;
+	}
+
+	private void startRouteReforgeWorkflow(
+		Minecraft client,
+		ReforgeTargetPlan.Plan plan,
+		Runnable finishHandler,
+		Consumer<String> errorHandler
+	) {
+		routeReforgeWorkflow = new RouteReforgeWorkflow(plan, finishHandler, errorHandler);
+		routeReforgeWorkflow.start(client);
 	}
 
 	private int startTimeBasedLookCommand(CommandContext<FabricClientCommandSource> context) {
@@ -2058,6 +2127,8 @@ public class AutoauctionClient implements ClientModInitializer {
 		private static final long MENU_TIMEOUT_MS = 8_000L;
 
 		private final ReforgeTargetPlan.Plan plan;
+		private final Runnable finishHandler;
+		private final Consumer<String> errorHandler;
 		private State state = State.WAIT_FOR_ROUTE;
 		private long startedAt;
 		private long stateStartedAt;
@@ -2067,8 +2138,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		private boolean rotationComplete;
 		private ArmorStand blacksmithStand;
 
-		private RouteReforgeWorkflow(ReforgeTargetPlan.Plan plan) {
+		private RouteReforgeWorkflow(ReforgeTargetPlan.Plan plan, Runnable finishHandler, Consumer<String> errorHandler) {
 			this.plan = plan;
+			this.finishHandler = finishHandler;
+			this.errorHandler = errorHandler;
 		}
 
 		private void start(Minecraft client) {
@@ -2171,7 +2244,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void waitForReforgeMenu(Minecraft client, long now) {
 			if (actions.screenTitleContains(client, "Reforge Item")) {
 				routeReforgeWorkflow = null;
-				startReforgeWorkflow(client, plan);
+				startReforgeWorkflow(client, plan, finishHandler, errorHandler);
 				return;
 			}
 			if (now - stateStartedAt > MENU_TIMEOUT_MS) {
@@ -2189,7 +2262,11 @@ public class AutoauctionClient implements ClientModInitializer {
 			routeReforgeWorkflow = null;
 			Autoauction.LOGGER.error("AutoAuction route reforge failed: {}", message);
 			sendClientFeedback(client, "AutoAuction route reforge failed: " + message);
-			notifyIssueAsync("route reforge failed: " + message);
+			if (errorHandler != null) {
+				errorHandler.accept(message);
+			} else {
+				notifyIssueAsync("route reforge failed: " + message);
+			}
 		}
 
 		private enum State {
@@ -2220,6 +2297,15 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void startReforgeWorkflow(Minecraft client, ReforgeTargetPlan.Plan plan) {
+		startReforgeWorkflow(client, plan, () -> {}, message -> notifyIssueAsync("reforge workflow failed: " + message));
+	}
+
+	private void startReforgeWorkflow(
+		Minecraft client,
+		ReforgeTargetPlan.Plan plan,
+		Runnable finishHandler,
+		Consumer<String> customErrorHandler
+	) {
 		reforgeWorkflow = new ReforgeWorkflow(
 			plan,
 			actions,
@@ -2228,9 +2314,19 @@ public class AutoauctionClient implements ClientModInitializer {
 			message -> {
 				Autoauction.LOGGER.error("AutoAuction reforge failed: {}", message);
 				sendClientFeedback(client, "AutoAuction reforge failed: " + message);
-				notifyIssueAsync("reforge workflow failed: " + message);
+				reforgeWorkflow = null;
+				if (customErrorHandler != null) {
+					customErrorHandler.accept(message);
+				} else {
+					notifyIssueAsync("reforge workflow failed: " + message);
+				}
 			},
-			() -> reforgeWorkflow = null
+			() -> {
+				reforgeWorkflow = null;
+				if (finishHandler != null) {
+					finishHandler.run();
+				}
+			}
 		);
 		reforgeWorkflow.start(client);
 	}
@@ -2247,6 +2343,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| finalDestinationCraftWorkflow != null
 			|| routeReforgeWorkflow != null
 			|| reforgeWorkflow != null
+			|| pendingSchedulerCraftReforge != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null;
@@ -2738,6 +2835,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		pendingReforgePlan = null;
 		routeReforgeWorkflow = null;
 		reforgeWorkflow = null;
+		pendingSchedulerCraftReforge = null;
 		workflowStarted = false;
 		controller.stop();
 		Autoauction.LOGGER.warn("AutoAuction cancelled: {}", reason);
@@ -4212,6 +4310,103 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private final class PendingSchedulerCraftReforge {
+		private final String reforge;
+		private State state = State.START_CRAFT;
+		private long stateStartedAt;
+
+		private PendingSchedulerCraftReforge(String reforge) {
+			this.reforge = reforge == null || reforge.isBlank() ? "Fierce" : reforge;
+		}
+
+		private void tick(Minecraft client) {
+			switch (state) {
+				case START_CRAFT -> startCraft(client);
+				case WAIT_CRAFT, WAIT_REFORGE -> {
+				}
+				case START_ROUTE_REFORGE -> startRouteReforge(client);
+				case EQUIP -> equip(client);
+				case DONE, ERROR -> {
+				}
+			}
+		}
+
+		private void startCraft(Minecraft client) {
+			if (finalDestinationCraftWorkflow != null) {
+				return;
+			}
+			finalDestinationCraftWorkflow = new FinalDestinationCraftWorkflow(
+				actions,
+				config.clickDelayMs(),
+				config.screenTimeoutMs(),
+				message -> sendClientFeedback(client, message),
+				message -> {
+					finalDestinationCraftWorkflow = null;
+					fail("FD crafter failed: " + message);
+				},
+				() -> {
+					finalDestinationCraftWorkflow = null;
+					transition(State.START_ROUTE_REFORGE);
+				}
+			);
+			finalDestinationCraftWorkflow.start(client);
+			transition(State.WAIT_CRAFT);
+		}
+
+		private void startRouteReforge(Minecraft client) {
+			Optional<ReforgeTargetPlan.Plan> plan = ReforgeTargetPlan.parse("fd armor", reforge);
+			if (plan.isEmpty()) {
+				fail("Unknown armor reforge: " + reforge);
+				return;
+			}
+			startRouteReforgeWorkflow(
+				client,
+				plan.get(),
+				() -> transition(State.EQUIP),
+				message -> fail("route reforge failed: " + message)
+			);
+			transition(State.WAIT_REFORGE);
+		}
+
+		private void equip(Minecraft client) {
+			actions.equipFinalDestinationArmorFromInventory(client);
+			if (actions.equippedArmorCount(client) == ArmorPiece.values().length) {
+				String current = currentUsername(client);
+				handoffClient.markScheduleCraftReforgeComplete(current);
+				transition(State.DONE);
+				pendingSchedulerCraftReforge = null;
+				sendRemoteClientLog("info", "Scheduler craft/reforge complete; new FD armor is equipped.");
+				continueSchedulerAfterCraftReforge(client);
+				return;
+			}
+			if (System.currentTimeMillis() - stateStartedAt > config.screenTimeoutMs()) {
+				fail("new FD armor was not fully equipped.");
+			}
+		}
+
+		private void fail(String message) {
+			transition(State.ERROR);
+			pendingSchedulerCraftReforge = null;
+			sendRemoteClientLog("error", "Scheduler craft/reforge failed: " + message);
+			notifyIssueAsync("scheduler craft/reforge failed: " + message);
+		}
+
+		private void transition(State next) {
+			state = next;
+			stateStartedAt = System.currentTimeMillis();
+		}
+
+		private enum State {
+			START_CRAFT,
+			WAIT_CRAFT,
+			START_ROUTE_REFORGE,
+			WAIT_REFORGE,
+			EQUIP,
+			DONE,
+			ERROR
+		}
+	}
+
 	private final class PendingHandoffPolicyAction {
 		private final HandoffPolicySnapshot policy;
 		private final String triggerKey;
@@ -4723,7 +4918,11 @@ public class AutoauctionClient implements ClientModInitializer {
 						+ PriceTextFormatter.forSign(currentItem().price()) + ".");
 					index++;
 					if (index >= pricedArmor.size()) {
-						transition(RealAuctionState.RETURN_TO_HUB, client);
+						if (shouldStayIslandAfterListing(postListingPolicy)) {
+							transition(RealAuctionState.WAIT_DISCONNECT, client);
+						} else {
+							transition(RealAuctionState.RETURN_TO_HUB, client);
+						}
 					} else {
 						transition(RealAuctionState.OPEN_AH, client);
 					}
@@ -4735,6 +4934,15 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_DISCONNECT -> {
 					debug(client, "Disconnecting after listing workflow.");
+					if (shouldStayIslandAfterListing(postListingPolicy)) {
+						String current = currentUsername(client);
+						handoffClient.markScheduleListingComplete(current);
+						transition(RealAuctionState.DONE, client);
+						realWorkflow = null;
+						sendRemoteClientLog("info", "Listed armor; staying on island for scheduler craft/reforge.");
+						continueSchedulerAfterListing(client, postListingPolicy);
+						return;
+					}
 					if (applyPostListingPolicy(client, postListingPolicy)) {
 						transition(RealAuctionState.DONE, client);
 						realWorkflow = null;
@@ -4900,11 +5108,19 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	static HandoffPolicySnapshot postListingPolicy(HandoffPolicySnapshot policy) {
-		return shouldApplyPostListingPolicy(policy) ? policy : null;
+		return shouldApplyPostListingPolicy(policy) || shouldStayIslandAfterListing(policy) ? policy : null;
 	}
 
 	static boolean shouldApplyPostListingPolicy(HandoffPolicySnapshot policy) {
 		return policy != null && !policy.schedulerPolicy() && !policy.listArmor();
+	}
+
+	static boolean shouldStayIslandAfterListing(HandoffPolicySnapshot policy) {
+		return policy != null && policy.schedulerPolicy() && policy.followUpCraftReforgeArmor();
+	}
+
+	static String schedulerCraftReforge(HandoffPolicySnapshot policy) {
+		return policy == null ? "Fierce" : policy.craftReforge();
 	}
 
 	static String retoggleStatusMessage(

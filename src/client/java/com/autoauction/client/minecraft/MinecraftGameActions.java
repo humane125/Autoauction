@@ -168,6 +168,34 @@ public final class MinecraftGameActions {
 		return !client.player.getItemBySlot(toEquipmentSlot(piece)).isEmpty();
 	}
 
+	public static String finalDestinationBaseName(ArmorPiece piece) {
+		return switch (piece) {
+			case HELMET -> "Final Destination Helmet";
+			case CHESTPLATE -> "Final Destination Chestplate";
+			case LEGGINGS -> "Final Destination Leggings";
+			case BOOTS -> "Final Destination Boots";
+		};
+	}
+
+	public boolean equipFinalDestinationArmorFromInventory(Minecraft client) {
+		if (client.player == null) {
+			return false;
+		}
+		openInventory(client);
+		boolean movedAny = false;
+		for (ArmorPiece piece : ArmorPiece.values()) {
+			if (isArmorPieceEquipped(client, piece)) {
+				continue;
+			}
+			Optional<Integer> slot = findInventoryHandlerSlotByItemName(client, finalDestinationBaseName(piece), 1);
+			if (slot.isPresent()) {
+				quickMoveSlot(client, slot.get());
+				movedAny = true;
+			}
+		}
+		return movedAny;
+	}
+
 	public void quickMoveArmorPieceToInventory(Minecraft client, ArmorPiece piece) {
 		if (client.player == null || client.gameMode == null) {
 			return;

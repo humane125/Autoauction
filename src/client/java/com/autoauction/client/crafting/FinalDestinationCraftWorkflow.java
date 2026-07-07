@@ -340,9 +340,11 @@ public final class FinalDestinationCraftWorkflow {
 
 	private void fail(String message) {
 		state = State.ERROR;
-		actions.closeScreen(Minecraft.getInstance());
+		Minecraft client = Minecraft.getInstance();
+		if (client != null) {
+			actions.closeScreen(client);
+		}
 		errorHandler.accept(message);
-		finishHandler.run();
 	}
 
 	private enum State {
