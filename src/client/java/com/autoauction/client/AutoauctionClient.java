@@ -211,6 +211,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingHandoff pendingHandoff;
 	private PendingHandoffPolicyAction pendingHandoffPolicyAction;
 	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
+	private PendingScheduledStart pendingScheduledStart;
+	private long failedScheduledStartAtEpochMs;
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 	private String suppressedSchedulerCraftReforgeKey = "";
 	private long suppressedSchedulerCraftReforgeUntilMs;
@@ -257,6 +259,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				pollNebulaLatestLog();
 				handlePendingHandoff(client);
 				handlePendingHandoffPolicyStop(client);
+				handleScheduledStart(client);
 				if (client.player == null || controller == null || actions == null) {
 					return;
 				}
@@ -812,6 +815,56 @@ public class AutoauctionClient implements ClientModInitializer {
 		workflowStarted = false;
 		sendRemoteClientLog("info", "Handoff policy stop timer complete; macro resumed.");
 		pendingHandoffPolicyStop = null;
+	}
+
+	private void handleScheduledStart(Minecraft client) {
+		if (pendingScheduledStart != null) {
+			pendingScheduledStart.tick(client);
+			return;
+		}
+		if (handoffClient == null || actions == null || macroController == null || controller == null) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		long scheduledStartAt = handoffClient.currentScheduleStartAtEpochMs();
+		if (scheduledStartAt <= 0L || scheduledStartAt == failedScheduledStartAtEpochMs) {
+			return;
+		}
+		if (!shouldStartScheduledScheduler(scheduledStartAt, now, workflowBusyForScheduledStart())) {
+			return;
+		}
+		pendingScheduledStart = new PendingScheduledStart(scheduledStartAt);
+		sendRemoteClientLog("info", "Scheduler delayed start is due; preparing Hypixel reconnect.");
+		pendingScheduledStart.tick(client);
+	}
+
+	private boolean workflowBusyForScheduledStart() {
+		return workflowStarted
+			|| realWorkflow != null
+			|| receiverBuyOrderWorkflow != null
+			|| receiverSellOfferWorkflow != null
+			|| senderPrepareTransferWorkflow != null
+			|| senderInstantSellWorkflow != null
+			|| senderInstantBuyWorkflow != null
+			|| senderEnderChestRestoreWorkflow != null
+			|| receiverClaimSellOfferWorkflow != null
+			|| finalDestinationCraftWorkflow != null
+			|| routeReforgeWorkflow != null
+			|| reforgeWorkflow != null
+			|| pendingSchedulerCraftReforge != null
+			|| pendingTransferFill != null
+			|| pendingTransferSellFill != null
+			|| transferLoopGoal != null
+			|| pendingHandoff != null
+			|| pendingHandoffPolicyAction != null
+			|| pendingHandoffPolicyStop != null;
+	}
+
+	private boolean isLoadedOnHypixel(Minecraft client) {
+		return client != null
+			&& client.player != null
+			&& client.getCurrentServer() != null
+			&& ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip);
 	}
 
 	private String screenText(Screen screen) {
@@ -1564,6 +1617,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| transferLoopGoal != null
 			|| pendingHandoff != null
 			|| pendingHandoffPolicyStop != null
+			|| pendingScheduledStart != null
 			|| !handoffPolicyCanRun(controller.state(), latestAccountStatsSnapshot);
 	}
 
@@ -2400,6 +2454,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| routeReforgeWorkflow != null
 			|| reforgeWorkflow != null
 			|| pendingSchedulerCraftReforge != null
+			|| pendingScheduledStart != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null;
@@ -2992,6 +3047,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		routeReforgeWorkflow = null;
 		reforgeWorkflow = null;
 		pendingSchedulerCraftReforge = null;
+		pendingScheduledStart = null;
 		timeBasedRotation.stop();
 		workflowStarted = false;
 		controller.stop();
@@ -4467,6 +4523,78 @@ public class AutoauctionClient implements ClientModInitializer {
 		}
 	}
 
+	private final class PendingScheduledStart {
+		private static final long TIMEOUT_MS = 120_000L;
+
+		private final long scheduledStartAt;
+		private final long startedAt = System.currentTimeMillis();
+		private boolean reconnectStarted;
+		private boolean claimed;
+		private long hypixelReadyAt;
+
+		private PendingScheduledStart(long scheduledStartAt) {
+			this.scheduledStartAt = scheduledStartAt;
+		}
+
+		private void tick(Minecraft client) {
+			if (System.currentTimeMillis() - startedAt > TIMEOUT_MS) {
+				fail("scheduler delayed start timed out.");
+				return;
+			}
+			if (!isLoadedOnHypixel(client)) {
+				hypixelReadyAt = 0L;
+				if (!reconnectStarted) {
+					reconnectStarted = true;
+					actions.connectToServer(client, "mc.hypixel.net");
+					sendRemoteClientLog("info", "Scheduler delayed start reconnecting to Hypixel.");
+				}
+				return;
+			}
+			long now = System.currentTimeMillis();
+			if (hypixelReadyAt == 0L) {
+				hypixelReadyAt = now;
+				return;
+			}
+			if (!hypixelReadyDelayElapsed(hypixelReadyAt, now)) {
+				return;
+			}
+			if (!claimed) {
+				String username = currentUsername(client);
+				if (!handoffClient.markScheduleStartClaimed(username)) {
+					fail("Alt Manager rejected delayed scheduler start claim for " + username + ".");
+					failedScheduledStartAtEpochMs = scheduledStartAt;
+					return;
+				}
+				claimed = true;
+				failedScheduledStartAtEpochMs = 0L;
+				sendRemoteClientLog("info", "Scheduler delayed start claimed for " + username + ".");
+			}
+			NebulaMacroController.EnsureResult macroStart = macroController.ensureOn(
+				command -> runMacroToggleCommand(client, command),
+				now
+			);
+			if (macroStart == NebulaMacroController.EnsureResult.PENDING) {
+				return;
+			}
+			if (macroStart == NebulaMacroController.EnsureResult.FAILED) {
+				fail("Nebula macro enable confirmation timed out after delayed scheduler start.");
+				return;
+			}
+			controller.start();
+			workflowStarted = false;
+			clearAccountStatsCache();
+			sendRemoteClientLog("info", "Scheduler delayed start complete; macro resumed.");
+			pendingScheduledStart = null;
+		}
+
+		private void fail(String message) {
+			Autoauction.LOGGER.warn("AutoAuction scheduled start failed: {}", message);
+			sendRemoteClientLog("error", "Scheduler delayed start failed: " + message);
+			notifyIssueAsync("scheduler delayed start failed: " + message);
+			pendingScheduledStart = null;
+		}
+	}
+
 	private final class PendingSchedulerCraftReforge {
 		private final String reforge;
 		private final String suppressionKey;
@@ -5251,6 +5379,10 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	static boolean hypixelReadyDelayElapsed(long hypixelReadyAt, long now) {
 		return hypixelReadyAt > 0L && now - hypixelReadyAt >= HYPIXEL_READY_MACRO_DELAY_MS;
+	}
+
+	static boolean shouldStartScheduledScheduler(long scheduledStartAt, long now, boolean workflowBusy) {
+		return scheduledStartAt > 0L && now >= scheduledStartAt && !workflowBusy;
 	}
 
 	static int islandCommandCooldownDelayMs() {

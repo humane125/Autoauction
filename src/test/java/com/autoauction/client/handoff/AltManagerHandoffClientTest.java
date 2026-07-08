@@ -20,6 +20,9 @@ class AltManagerHandoffClientTest {
 		FakeScheduleBridge.listingMarked = false;
 		FakeScheduleBridge.craftReforgeMarked = false;
 		FakeScheduleBridge.waitUntil = 0L;
+		FakeScheduleBridge.startAt = 0L;
+		FakeScheduleBridge.claimedStartAccount = "";
+		FakeScheduleBridge.claimStartResult = false;
 		FakeScheduleBridge.nextScheduledAccount = "";
 		FakeScheduleBridge.scheduleEnabled = false;
 	}
@@ -180,6 +183,20 @@ class AltManagerHandoffClientTest {
 		assertTrue(FakeScheduleBridge.craftReforgeMarked);
 	}
 
+	@Test
+	void readsAndClaimsScheduledStartByReflection() {
+		FakeScheduleBridge.startAt = 123_456L;
+		FakeScheduleBridge.claimStartResult = true;
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		assertEquals(123_456L, client.currentScheduleStartAtEpochMs());
+		assertTrue(client.markScheduleStartClaimed("Macro"));
+		assertEquals("Macro", FakeScheduleBridge.claimedStartAccount);
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
@@ -220,6 +237,9 @@ class AltManagerHandoffClientTest {
 		private static boolean listingMarked;
 		private static boolean craftReforgeMarked;
 		private static long waitUntil;
+		private static long startAt;
+		private static String claimedStartAccount = "";
+		private static boolean claimStartResult;
 		private static String nextScheduledAccount = "";
 		private static boolean scheduleEnabled;
 
@@ -244,6 +264,15 @@ class AltManagerHandoffClientTest {
 
 		public static long currentScheduleWaitUntilEpochMs() {
 			return waitUntil;
+		}
+
+		public static long currentScheduleStartAtEpochMs() {
+			return startAt;
+		}
+
+		public static boolean markScheduleStartClaimed(String uuidOrName) {
+			claimedStartAccount = uuidOrName;
+			return claimStartResult;
 		}
 
 		public static String nextScheduledAccount(String currentUuidOrName) {

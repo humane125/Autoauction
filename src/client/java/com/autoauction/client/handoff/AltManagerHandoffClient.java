@@ -131,10 +131,27 @@ public final class AltManagerHandoffClient {
 		return booleanScheduleCall("markScheduleCraftReforgeComplete", uuidOrName);
 	}
 
+	public boolean markScheduleStartClaimed(String uuidOrName) {
+		return booleanScheduleCall("markScheduleStartClaimed", uuidOrName);
+	}
+
 	public long currentScheduleWaitUntilEpochMs() {
 		try {
 			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
 			Method method = bridgeClass.getMethod("currentScheduleWaitUntilEpochMs");
+			Object value = method.invoke(null);
+			return value instanceof Number number ? number.longValue() : 0L;
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return 0L;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return 0L;
+		}
+	}
+
+	public long currentScheduleStartAtEpochMs() {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method = bridgeClass.getMethod("currentScheduleStartAtEpochMs");
 			Object value = method.invoke(null);
 			return value instanceof Number number ? number.longValue() : 0L;
 		} catch (ClassNotFoundException | NoSuchMethodException e) {

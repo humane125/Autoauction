@@ -83,6 +83,15 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void scheduledSchedulerStartsOnlyWhenDueAndIdle() {
+		assertTrue(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 10_000L, false));
+		assertTrue(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 11_000L, false));
+		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 9_999L, false));
+		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(0L, 11_000L, false));
+		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 11_000L, true));
+	}
+
+	@Test
 	void remoteInstanceActionsDoNotRequireLoadedPlayer() {
 		assertEquals(false, AutoauctionClient.remoteActionRequiresLoadedPlayer("reconnect_hypixel"));
 		assertEquals(false, AutoauctionClient.remoteActionRequiresLoadedPlayer("close_instance"));
