@@ -4666,6 +4666,8 @@ public class AutoauctionClient implements ClientModInitializer {
 
 		private final AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry;
 		private final long startedAt = System.currentTimeMillis();
+		private State state = State.STOP_MACRO;
+		private long islandCommandSentAt;
 
 		private PendingScheduledStop(AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry) {
 			this.entry = entry;
@@ -4687,6 +4689,20 @@ public class AutoauctionClient implements ClientModInitializer {
 				pendingScheduledStop = null;
 				return;
 			}
+			if (state == State.RETURN_ISLAND) {
+				actions.sendChatCommand(client, "is");
+				islandCommandSentAt = now;
+				state = State.WAIT_ISLAND;
+				sendRemoteClientLog("info", "Scheduler stop returned to island before disconnect.");
+				return;
+			}
+			if (state == State.WAIT_ISLAND) {
+				if (now - islandCommandSentAt < islandCommandCooldownDelayMs()) {
+					return;
+				}
+				claimAndDisconnect(client);
+				return;
+			}
 			NebulaMacroController.EnsureResult macroStop = macroController.ensureOff(
 				command -> runMacroToggleCommand(client, command),
 				now
@@ -4698,6 +4714,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				fail("Nebula macro disable confirmation timed out for scheduler stop.");
 				return;
 			}
+			state = State.RETURN_ISLAND;
+		}
+
+		private void claimAndDisconnect(Minecraft client) {
 			if (!handoffClient.markScheduleTimeEntryClaimed(entry.id())) {
 				fail("Alt Manager rejected scheduler stop claim.");
 				return;
@@ -4716,6 +4736,12 @@ public class AutoauctionClient implements ClientModInitializer {
 			notifyIssueAsync("scheduler stop failed: " + message);
 			failedScheduleTimeEntryId = entry.id();
 			pendingScheduledStop = null;
+		}
+
+		private enum State {
+			STOP_MACRO,
+			RETURN_ISLAND,
+			WAIT_ISLAND
 		}
 	}
 
