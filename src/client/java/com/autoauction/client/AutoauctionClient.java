@@ -1665,6 +1665,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		return false;
 	}
 
+	static boolean shouldRequireSchedulerListingAcknowledgement(HandoffPolicySnapshot postListingPolicy) {
+		return postListingPolicy != null && postListingPolicy.schedulerPolicy() && postListingPolicy.listArmor();
+	}
+
 	private String handoffPolicyTriggerKey(Minecraft client, HandoffPolicySnapshot policy) {
 		String currentUsername = client.getUser() == null ? "" : client.getUser().getName();
 		String policyKey = policy.triggerKey() == null || policy.triggerKey().isBlank()
@@ -5110,7 +5114,8 @@ public class AutoauctionClient implements ClientModInitializer {
 					debug(client, "Disconnecting after listing workflow.");
 					if (shouldStayIslandAfterListing(postListingPolicy)) {
 						String current = currentUsername(client);
-						if (!schedulerListingCompletionAcknowledged(current)) {
+						if (shouldRequireSchedulerListingAcknowledgement(postListingPolicy)
+							&& !schedulerListingCompletionAcknowledged(current)) {
 							transition(RealAuctionState.DONE, client);
 							realWorkflow = null;
 							workflowStarted = false;
@@ -5130,7 +5135,8 @@ public class AutoauctionClient implements ClientModInitializer {
 					}
 					String current = currentUsername(client);
 					String scheduledNext = handoffClient.nextScheduledAccount(current);
-					if (!schedulerListingCompletionAcknowledged(current)) {
+					if (shouldRequireSchedulerListingAcknowledgement(postListingPolicy)
+						&& !schedulerListingCompletionAcknowledged(current)) {
 						transition(RealAuctionState.DONE, client);
 						realWorkflow = null;
 						workflowStarted = false;

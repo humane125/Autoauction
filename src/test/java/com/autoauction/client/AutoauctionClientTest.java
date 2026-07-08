@@ -216,6 +216,42 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void schedulerListingAcknowledgementIsOnlyRequiredForSchedulerListingFlows() {
+		HandoffPolicySnapshot schedulerListPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"LIST_ARMOR",
+			0,
+			"FINAL_LISTING",
+			true,
+			"uuid-two",
+			false
+		);
+		HandoffPolicySnapshot schedulerListWithCraftPolicy = new HandoffPolicySnapshot(
+			"Macro",
+			"uuid-one",
+			25_000,
+			"LIST_ARMOR",
+			0,
+			"FINAL_LISTING",
+			true,
+			"uuid-two",
+			false,
+			"trigger",
+			"",
+			"CRAFT_REFORGE_ARMOR",
+			"Fierce"
+		);
+		HandoffPolicySnapshot manualPolicy = new HandoffPolicySnapshot("Macro", "uuid-one", 25_000, "NEXT_ACCOUNT", 0);
+
+		assertFalse(AutoauctionClient.shouldRequireSchedulerListingAcknowledgement(null));
+		assertFalse(AutoauctionClient.shouldRequireSchedulerListingAcknowledgement(manualPolicy));
+		assertTrue(AutoauctionClient.shouldRequireSchedulerListingAcknowledgement(schedulerListPolicy));
+		assertTrue(AutoauctionClient.shouldRequireSchedulerListingAcknowledgement(schedulerListWithCraftPolicy));
+	}
+
+	@Test
 	void schedulerCraftReforgeUsesFierceWhenBlank() {
 		HandoffPolicySnapshot policy = new HandoffPolicySnapshot(
 			"Macro",
