@@ -212,7 +212,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingHandoffPolicyAction pendingHandoffPolicyAction;
 	private PendingHandoffPolicyStop pendingHandoffPolicyStop;
 	private PendingScheduledStart pendingScheduledStart;
+	private PendingScheduledStop pendingScheduledStop;
 	private long failedScheduledStartAtEpochMs;
+	private String failedScheduleTimeEntryId = "";
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 	private String suppressedSchedulerCraftReforgeKey = "";
 	private long suppressedSchedulerCraftReforgeUntilMs;
@@ -822,10 +824,39 @@ public class AutoauctionClient implements ClientModInitializer {
 			pendingScheduledStart.tick(client);
 			return;
 		}
+		if (pendingScheduledStop != null) {
+			pendingScheduledStop.tick(client);
+			return;
+		}
 		if (handoffClient == null || actions == null || macroController == null || controller == null) {
 			return;
 		}
 		long now = System.currentTimeMillis();
+		Optional<AltManagerHandoffClient.ScheduleTimeEntrySnapshot> dueEntry =
+			handoffClient.currentDueScheduleTimeEntry();
+		if (dueEntry.isPresent()) {
+			AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry = dueEntry.get();
+			if (entry.id().equals(failedScheduleTimeEntryId)) {
+				return;
+			}
+			if (workflowBusyForScheduledStart()) {
+				return;
+			}
+			if (entry.start()) {
+				pendingScheduledStart = new PendingScheduledStart(entry);
+				sendRemoteClientLog("info", "Scheduler start time is due (" + entry.rawInput()
+					+ "); preparing Hypixel reconnect.");
+				pendingScheduledStart.tick(client);
+				return;
+			}
+			if (entry.stop()) {
+				pendingScheduledStop = new PendingScheduledStop(entry);
+				sendRemoteClientLog("info", "Scheduler stop time is due (" + entry.rawInput()
+					+ "); stopping macro and disconnecting.");
+				pendingScheduledStop.tick(client);
+			}
+			return;
+		}
 		long scheduledStartAt = handoffClient.currentScheduleStartAtEpochMs();
 		if (scheduledStartAt <= 0L || scheduledStartAt == failedScheduledStartAtEpochMs) {
 			return;
@@ -857,7 +888,8 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| transferLoopGoal != null
 			|| pendingHandoff != null
 			|| pendingHandoffPolicyAction != null
-			|| pendingHandoffPolicyStop != null;
+			|| pendingHandoffPolicyStop != null
+			|| pendingScheduledStop != null;
 	}
 
 	private boolean isLoadedOnHypixel(Minecraft client) {
@@ -1618,6 +1650,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| pendingHandoff != null
 			|| pendingHandoffPolicyStop != null
 			|| pendingScheduledStart != null
+			|| pendingScheduledStop != null
 			|| !handoffPolicyCanRun(controller.state(), latestAccountStatsSnapshot);
 	}
 
@@ -2455,6 +2488,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| reforgeWorkflow != null
 			|| pendingSchedulerCraftReforge != null
 			|| pendingScheduledStart != null
+			|| pendingScheduledStop != null
 			|| pendingTransferFill != null
 			|| pendingTransferSellFill != null
 			|| transferLoopGoal != null;
@@ -3048,6 +3082,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		reforgeWorkflow = null;
 		pendingSchedulerCraftReforge = null;
 		pendingScheduledStart = null;
+		pendingScheduledStop = null;
 		timeBasedRotation.stop();
 		workflowStarted = false;
 		controller.stop();
@@ -4526,6 +4561,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final class PendingScheduledStart {
 		private static final long TIMEOUT_MS = 120_000L;
 
+		private final String timeEntryId;
+		private final String rawInput;
 		private final long scheduledStartAt;
 		private final long startedAt = System.currentTimeMillis();
 		private boolean reconnectStarted;
@@ -4533,6 +4570,16 @@ public class AutoauctionClient implements ClientModInitializer {
 		private long hypixelReadyAt;
 
 		private PendingScheduledStart(long scheduledStartAt) {
+			this("", "", scheduledStartAt);
+		}
+
+		private PendingScheduledStart(AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry) {
+			this(entry.id(), entry.rawInput(), entry.scheduledEpochMs());
+		}
+
+		private PendingScheduledStart(String timeEntryId, String rawInput, long scheduledStartAt) {
+			this.timeEntryId = timeEntryId == null ? "" : timeEntryId;
+			this.rawInput = rawInput == null ? "" : rawInput;
 			this.scheduledStartAt = scheduledStartAt;
 		}
 
@@ -4560,13 +4607,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 			if (!claimed) {
 				String username = currentUsername(client);
-				if (!handoffClient.markScheduleStartClaimed(username)) {
-					fail("Alt Manager rejected delayed scheduler start claim for " + username + ".");
-					failedScheduledStartAtEpochMs = scheduledStartAt;
+				if (!claim(username)) {
+					fail("Alt Manager rejected delayed scheduler start claim for " + claimTarget(username) + ".");
 					return;
 				}
 				claimed = true;
 				failedScheduledStartAtEpochMs = 0L;
+				failedScheduleTimeEntryId = "";
 				sendRemoteClientLog("info", "Scheduler delayed start claimed for " + username + ".");
 			}
 			NebulaMacroController.EnsureResult macroStart = macroController.ensureOn(
@@ -4587,11 +4634,88 @@ public class AutoauctionClient implements ClientModInitializer {
 			pendingScheduledStart = null;
 		}
 
+		private boolean claim(String username) {
+			if (!timeEntryId.isBlank()) {
+				return handoffClient.markScheduleTimeEntryClaimed(timeEntryId);
+			}
+			return handoffClient.markScheduleStartClaimed(username);
+		}
+
+		private String claimTarget(String username) {
+			if (!timeEntryId.isBlank()) {
+				return "time entry " + timeEntryId + (rawInput.isBlank() ? "" : " (" + rawInput + ")");
+			}
+			return username;
+		}
+
 		private void fail(String message) {
 			Autoauction.LOGGER.warn("AutoAuction scheduled start failed: {}", message);
 			sendRemoteClientLog("error", "Scheduler delayed start failed: " + message);
 			notifyIssueAsync("scheduler delayed start failed: " + message);
+			if (!timeEntryId.isBlank()) {
+				failedScheduleTimeEntryId = timeEntryId;
+			} else {
+				failedScheduledStartAtEpochMs = scheduledStartAt;
+			}
 			pendingScheduledStart = null;
+		}
+	}
+
+	private final class PendingScheduledStop {
+		private static final long TIMEOUT_MS = 60_000L;
+
+		private final AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry;
+		private final long startedAt = System.currentTimeMillis();
+
+		private PendingScheduledStop(AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry) {
+			this.entry = entry;
+		}
+
+		private void tick(Minecraft client) {
+			long now = System.currentTimeMillis();
+			if (now - startedAt > TIMEOUT_MS) {
+				fail("scheduler stop timed out.");
+				return;
+			}
+			if (client.player == null) {
+				if (handoffClient.markScheduleTimeEntryClaimed(entry.id())) {
+					failedScheduleTimeEntryId = "";
+					sendRemoteClientLog("info", "Scheduler stop time claimed while already disconnected.");
+				} else {
+					fail("Alt Manager rejected scheduler stop claim while already disconnected.");
+				}
+				pendingScheduledStop = null;
+				return;
+			}
+			NebulaMacroController.EnsureResult macroStop = macroController.ensureOff(
+				command -> runMacroToggleCommand(client, command),
+				now
+			);
+			if (macroStop == NebulaMacroController.EnsureResult.PENDING) {
+				return;
+			}
+			if (macroStop == NebulaMacroController.EnsureResult.FAILED) {
+				fail("Nebula macro disable confirmation timed out for scheduler stop.");
+				return;
+			}
+			if (!handoffClient.markScheduleTimeEntryClaimed(entry.id())) {
+				fail("Alt Manager rejected scheduler stop claim.");
+				return;
+			}
+			failedScheduleTimeEntryId = "";
+			controller.stop();
+			workflowStarted = false;
+			disconnectIntentionally(client, "AutoAuction scheduler stop time reached.");
+			sendRemoteClientLog("info", "Scheduler stop complete; macro disabled and client disconnected.");
+			pendingScheduledStop = null;
+		}
+
+		private void fail(String message) {
+			Autoauction.LOGGER.warn("AutoAuction scheduled stop failed: {}", message);
+			sendRemoteClientLog("error", "Scheduler stop failed: " + message);
+			notifyIssueAsync("scheduler stop failed: " + message);
+			failedScheduleTimeEntryId = entry.id();
+			pendingScheduledStop = null;
 		}
 	}
 

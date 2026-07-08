@@ -23,6 +23,9 @@ class AltManagerHandoffClientTest {
 		FakeScheduleBridge.startAt = 0L;
 		FakeScheduleBridge.claimedStartAccount = "";
 		FakeScheduleBridge.claimStartResult = false;
+		FakeScheduleBridge.timeEntry = Optional.empty();
+		FakeScheduleBridge.claimedTimeEntryId = "";
+		FakeScheduleBridge.claimTimeEntryResult = false;
 		FakeScheduleBridge.nextScheduledAccount = "";
 		FakeScheduleBridge.scheduleEnabled = false;
 	}
@@ -197,6 +200,37 @@ class AltManagerHandoffClientTest {
 		assertEquals("Macro", FakeScheduleBridge.claimedStartAccount);
 	}
 
+	@Test
+	void readsAndClaimsDueScheduleTimeEntryByReflection() {
+		FakeScheduleBridge.timeEntry = Optional.of(new FakeScheduleTimeEntry(
+			"entry-1",
+			FakeScheduleTimeEntryType.START,
+			"9:30 PM",
+			123_456L,
+			true,
+			true
+		));
+		FakeScheduleBridge.claimTimeEntryResult = true;
+		AltManagerHandoffClient client = new AltManagerHandoffClient(
+			FakeAccountSwitcher.class.getName(),
+			FakeScheduleBridge.class.getName()
+		);
+
+		Optional<AltManagerHandoffClient.ScheduleTimeEntrySnapshot> entry =
+			client.currentDueScheduleTimeEntry();
+
+		assertTrue(entry.isPresent());
+		assertEquals("entry-1", entry.get().id());
+		assertEquals("START", entry.get().type());
+		assertEquals("9:30 PM", entry.get().rawInput());
+		assertEquals(123_456L, entry.get().scheduledEpochMs());
+		assertTrue(entry.get().daily());
+		assertTrue(entry.get().enabled());
+		assertTrue(entry.get().start());
+		assertTrue(client.markScheduleTimeEntryClaimed("entry-1"));
+		assertEquals("entry-1", FakeScheduleBridge.claimedTimeEntryId);
+	}
+
 	public static final class FakeAccountSwitcher {
 		private static String switchTarget = "";
 		private static int switchCalls;
@@ -240,6 +274,9 @@ class AltManagerHandoffClientTest {
 		private static long startAt;
 		private static String claimedStartAccount = "";
 		private static boolean claimStartResult;
+		private static Optional<FakeScheduleTimeEntry> timeEntry = Optional.empty();
+		private static String claimedTimeEntryId = "";
+		private static boolean claimTimeEntryResult;
 		private static String nextScheduledAccount = "";
 		private static boolean scheduleEnabled;
 
@@ -273,6 +310,15 @@ class AltManagerHandoffClientTest {
 		public static boolean markScheduleStartClaimed(String uuidOrName) {
 			claimedStartAccount = uuidOrName;
 			return claimStartResult;
+		}
+
+		public static Optional<FakeScheduleTimeEntry> currentDueScheduleTimeEntry() {
+			return timeEntry;
+		}
+
+		public static boolean markScheduleTimeEntryClaimed(String id) {
+			claimedTimeEntryId = id;
+			return claimTimeEntryResult;
 		}
 
 		public static String nextScheduledAccount(String currentUuidOrName) {
@@ -320,5 +366,20 @@ class AltManagerHandoffClientTest {
 			this(username, uuid, killLimit, action, stopHours, phase, finalListing, nextAccount, waitAfterHandoff,
 				triggerKey, "", "", "");
 		}
+	}
+
+	public enum FakeScheduleTimeEntryType {
+		START,
+		STOP
+	}
+
+	public record FakeScheduleTimeEntry(
+		String id,
+		FakeScheduleTimeEntryType type,
+		String rawInput,
+		long scheduledEpochMs,
+		boolean daily,
+		boolean enabled
+	) {
 	}
 }

@@ -135,6 +135,26 @@ public final class AltManagerHandoffClient {
 		return booleanScheduleCall("markScheduleStartClaimed", uuidOrName);
 	}
 
+	public boolean markScheduleTimeEntryClaimed(String id) {
+		return booleanScheduleCall("markScheduleTimeEntryClaimed", id);
+	}
+
+	public Optional<ScheduleTimeEntrySnapshot> currentDueScheduleTimeEntry() {
+		try {
+			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
+			Method method = bridgeClass.getMethod("currentDueScheduleTimeEntry");
+			Object value = method.invoke(null);
+			if (!(value instanceof Optional<?> optional) || optional.isEmpty()) {
+				return Optional.empty();
+			}
+			return Optional.of(scheduleTimeEntrySnapshot(optional.get()));
+		} catch (ClassNotFoundException | NoSuchMethodException e) {
+			return Optional.empty();
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			return Optional.empty();
+		}
+	}
+
 	public long currentScheduleWaitUntilEpochMs() {
 		try {
 			Class<?> bridgeClass = Class.forName(scheduleBridgeClassName);
@@ -243,6 +263,18 @@ public final class AltManagerHandoffClient {
 		);
 	}
 
+	private static ScheduleTimeEntrySnapshot scheduleTimeEntrySnapshot(Object entry)
+		throws ReflectiveOperationException {
+		return new ScheduleTimeEntrySnapshot(
+			stringRecordValue(entry, "id"),
+			stringRecordValue(entry, "type"),
+			stringRecordValue(entry, "rawInput"),
+			longRecordValue(entry, "scheduledEpochMs"),
+			booleanRecordValue(entry, "daily"),
+			booleanRecordValue(entry, "enabled")
+		);
+	}
+
 	private static String stringRecordValue(Object value, String methodName) throws ReflectiveOperationException {
 		Object result = value.getClass().getMethod(methodName).invoke(value);
 		return String.valueOf(result == null ? "" : result);
@@ -251,6 +283,16 @@ public final class AltManagerHandoffClient {
 	private static int intRecordValue(Object value, String methodName) throws ReflectiveOperationException {
 		Object result = value.getClass().getMethod(methodName).invoke(value);
 		return result instanceof Number number ? number.intValue() : 0;
+	}
+
+	private static long longRecordValue(Object value, String methodName) throws ReflectiveOperationException {
+		Object result = value.getClass().getMethod(methodName).invoke(value);
+		return result instanceof Number number ? number.longValue() : 0L;
+	}
+
+	private static boolean booleanRecordValue(Object value, String methodName) throws ReflectiveOperationException {
+		Object result = value.getClass().getMethod(methodName).invoke(value);
+		return result instanceof Boolean bool && bool;
 	}
 
 	private static String optionalStringRecordValue(Object value, String methodName) {
@@ -283,5 +325,22 @@ public final class AltManagerHandoffClient {
 	public enum ProxyReadiness {
 		READY,
 		WAITING
+	}
+
+	public record ScheduleTimeEntrySnapshot(
+		String id,
+		String type,
+		String rawInput,
+		long scheduledEpochMs,
+		boolean daily,
+		boolean enabled
+	) {
+		public boolean start() {
+			return "START".equalsIgnoreCase(type);
+		}
+
+		public boolean stop() {
+			return "STOP".equalsIgnoreCase(type);
+		}
 	}
 }
