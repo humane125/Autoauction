@@ -353,7 +353,7 @@ public final class ModSocketClient implements AutoCloseable {
 			return;
 		}
 		String type = message.get("type").getAsString();
-		log("AutoAuction mod socket received " + type);
+		logReceived(type);
 		if (Objects.equals(type, "auth_ok")) {
 			sendDesiredStatus();
 			requestRegisteredAccounts();
@@ -647,7 +647,7 @@ public final class ModSocketClient implements AutoCloseable {
 			message.addProperty("capturedAt", cleanCapturedAt);
 		}
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent client_screenshot");
+		logSent("client_screenshot");
 		return true;
 	}
 
@@ -677,7 +677,7 @@ public final class ModSocketClient implements AutoCloseable {
 			message.add("segments", cleanSegments);
 		}
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent client_log");
+		logSent("client_log");
 		return true;
 	}
 
@@ -704,7 +704,7 @@ public final class ModSocketClient implements AutoCloseable {
 		message.addProperty("macroing", snapshot.macroing());
 		message.add("finalDestinationKills", kills);
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent account_stats");
+		logSent("account_stats");
 		return true;
 	}
 
@@ -720,7 +720,7 @@ public final class ModSocketClient implements AutoCloseable {
 			message.addProperty("pricePerEye", event.pricePerEye());
 		}
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent summoning_eye_event");
+		logSent("summoning_eye_event");
 		return true;
 	}
 
@@ -735,7 +735,7 @@ public final class ModSocketClient implements AutoCloseable {
 			return false;
 		}
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent " + message.get("type").getAsString());
+		logSent(message.get("type").getAsString());
 		return true;
 	}
 
@@ -746,7 +746,7 @@ public final class ModSocketClient implements AutoCloseable {
 		JsonObject message = new JsonObject();
 		message.addProperty("type", "registered_accounts");
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket requested registered_accounts");
+		logSent("registered_accounts");
 		return true;
 	}
 
@@ -755,7 +755,7 @@ public final class ModSocketClient implements AutoCloseable {
 			return false;
 		}
 		connection.send(GSON.toJson(new StatusMessage(status)));
-		log("AutoAuction mod socket sent " + status);
+		logSent(status);
 		authenticated = true;
 		lastReportedStatus = status;
 		return true;
@@ -789,7 +789,7 @@ public final class ModSocketClient implements AutoCloseable {
 			}
 		}
 		connection.send(GSON.toJson(message));
-		log("AutoAuction mod socket sent banned");
+		logSent("banned");
 		authenticated = true;
 		lastReportedStatus = "banned";
 		return true;
@@ -808,7 +808,7 @@ public final class ModSocketClient implements AutoCloseable {
 			}
 			if (current != null) {
 				current.send("{\"type\":\"heartbeat\"}");
-				log("AutoAuction mod socket sent heartbeat");
+				logSent("heartbeat");
 			}
 		}, heartbeatIntervalMs, heartbeatIntervalMs, TimeUnit.MILLISECONDS);
 	}
@@ -920,6 +920,25 @@ public final class ModSocketClient implements AutoCloseable {
 
 	private void log(String message) {
 		logSink.accept(message);
+	}
+
+	private void logSent(String type) {
+		if (!quietSocketMessage(type)) {
+			log("AutoAuction mod socket sent " + type);
+		}
+	}
+
+	private void logReceived(String type) {
+		if (!quietSocketMessage(type)) {
+			log("AutoAuction mod socket received " + type);
+		}
+	}
+
+	private boolean quietSocketMessage(String type) {
+		return switch (String.valueOf(type == null ? "" : type)) {
+			case "heartbeat", "heartbeat_ok", "account_stats", "client_log", "client_screenshot", "summoning_eye_event" -> true;
+			default -> false;
+		};
 	}
 
 	private String cleanImageMime(String imageMime) {

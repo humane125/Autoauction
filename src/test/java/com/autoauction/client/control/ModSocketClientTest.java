@@ -199,7 +199,7 @@ class ModSocketClientTest {
 		assertTrue(logs.stream().anyMatch(log -> log.contains("received auth_ok")));
 		assertTrue(logs.stream().anyMatch(log -> log.contains("sent active")));
 		assertTrue(logs.stream().anyMatch(log -> log.contains("heartbeat started")));
-		assertTrue(logs.stream().anyMatch(log -> log.contains("sent heartbeat")));
+		assertFalse(logs.stream().anyMatch(log -> log.contains("sent heartbeat")));
 		assertTrue(logs.stream().anyMatch(log -> log.contains("sent offline")));
 		assertTrue(logs.stream().anyMatch(log -> log.contains("closed")));
 		assertFalse(String.join("\n", logs).contains("hpx_test_secret_mod_key"));

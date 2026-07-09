@@ -53,6 +53,7 @@ import com.autoauction.client.transfer.TransferController;
 import com.autoauction.client.transfer.TransferDebugMessages;
 import com.autoauction.client.transfer.TransferLoopGoal;
 import com.autoauction.client.transfer.TransferPurseTracker;
+import com.autoauction.client.update.ModReleaseUpdater;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -247,6 +248,15 @@ public class AutoauctionClient implements ClientModInitializer {
 			this.macroController = new NebulaMacroController();
 			this.nebulaLatestLogWatcher = new NebulaLatestLogWatcher(
 				FabricLoader.getInstance().getGameDir().resolve("logs").resolve("latest.log")
+			);
+			ModReleaseUpdater.checkForUpdateAsync(
+				"autoauction",
+				"AutoAuction",
+				config.apiBaseUrl(),
+				config.apiToken(),
+				() -> Minecraft.getInstance().execute(() -> Minecraft.getInstance().stop()),
+				Autoauction.LOGGER::info,
+				Autoauction.LOGGER::warn
 			);
 			registerCommands();
 			registerOutgoingCommandHandlers();
