@@ -78,6 +78,15 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void fallsBackFiveSecondsAfterReconnectWhenSkyBlockScoreboardIsMissing() {
+		long reconnectStartedAt = 20_000L;
+
+		assertEquals(false, AutoauctionClient.skyBlockFallbackDelayElapsed(reconnectStartedAt, 24_999L));
+		assertEquals(true, AutoauctionClient.skyBlockFallbackDelayElapsed(reconnectStartedAt, 25_000L));
+		assertEquals(false, AutoauctionClient.skyBlockFallbackDelayElapsed(0L, 30_000L));
+	}
+
+	@Test
 	void waitsFiveAndHalfSecondsAfterIslandReturnBeforeMoreCommands() {
 		assertEquals(5_500, AutoauctionClient.islandCommandCooldownDelayMs());
 	}
@@ -89,6 +98,7 @@ class AutoauctionClientTest {
 		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 9_999L, false));
 		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(0L, 11_000L, false));
 		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 11_000L, true));
+		assertFalse(AutoauctionClient.shouldStartScheduledScheduler(10_000L, 11_000L, false, true));
 	}
 
 	@Test

@@ -216,7 +216,10 @@ public class AutoauctionClient implements ClientModInitializer {
 	private long failedScheduledStartAtEpochMs;
 	private String failedScheduleTimeEntryId = "";
 	private long failedScheduleTimeEntryAtMs;
+	private boolean reconnectSafetyHold;
+	private String reconnectSafetyReason = "";
 	private static final long SCHEDULE_TIME_ENTRY_RETRY_DELAY_MS = 60_000L;
+	private static final long SKYBLOCK_SCOREBOARD_FALLBACK_MS = 5_000L;
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 	private String suppressedSchedulerCraftReforgeKey = "";
 	private long suppressedSchedulerCraftReforgeUntilMs;
@@ -374,7 +377,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		ClientLoginConnectionEvents.DISCONNECT.register((handler, client) -> {
 			DisconnectionDetails details = disconnectionDetailsFrom(handler);
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
-				suppressBadConnectionReconnect(System.currentTimeMillis());
+				activateReconnectSafetyHold("ban disconnect");
 				reportModBanStatus(details, "login disconnect");
 				return;
 			}
@@ -383,7 +386,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			DisconnectionDetails details = connectionDisconnectionDetails(handler.getConnection());
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
-				suppressBadConnectionReconnect(System.currentTimeMillis());
+				activateReconnectSafetyHold("ban disconnect");
 				reportModBanStatus(details, "play disconnect");
 				return;
 			}
@@ -397,7 +400,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		String reason = disconnectionReason(details);
 		long now = System.currentTimeMillis();
 		if (isReconnectSuppressedDisconnectReason(reason)) {
-			suppressBadConnectionReconnect(now);
+			activateReconnectSafetyHold(reason);
 			sendRemoteClientLog("warn", "Reconnect suppressed after disconnect reason: " + reason);
 			return;
 		}
@@ -430,6 +433,33 @@ public class AutoauctionClient implements ClientModInitializer {
 		badConnectionReconnectController.suppressIntentionalDisconnects(now);
 	}
 
+	private void activateReconnectSafetyHold(String reason) {
+		reconnectSafetyHold = true;
+		reconnectSafetyReason = String.valueOf(reason == null || reason.isBlank() ? "safety disconnect" : reason);
+		suppressBadConnectionReconnect(System.currentTimeMillis());
+		pendingHandoff = null;
+		pendingHandoffPolicyStop = null;
+		pendingScheduledStart = null;
+	}
+
+	private void clearReconnectSafetyHold(String source) {
+		if (reconnectSafetyHold) {
+			sendRemoteClientLog("info", "Reconnect safety hold cleared by " + source + ".");
+		}
+		reconnectSafetyHold = false;
+		reconnectSafetyReason = "";
+	}
+
+	private boolean connectToHypixelIfAllowed(Minecraft client, String source) {
+		if (reconnectSafetyHold) {
+			sendRemoteClientLog("warn", source + " skipped: reconnect safety hold active"
+				+ (reconnectSafetyReason.isBlank() ? "." : " (" + reconnectSafetyReason + ")."));
+			return false;
+		}
+		actions.connectToServer(client, "mc.hypixel.net");
+		return true;
+	}
+
 	private void handlePendingBadConnectionReconnect(Minecraft client) {
 		if (!badConnectionReconnectController.hasPendingReconnect()) {
 			return;
@@ -442,8 +472,9 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 		badConnectionReconnectController.clearPendingReconnect();
-		actions.connectToServer(client, "mc.hypixel.net");
-		sendRemoteClientLog("info", "Auto reconnecting to Hypixel after bad connection.");
+		if (connectToHypixelIfAllowed(client, "Bad-connection reconnect")) {
+			sendRemoteClientLog("info", "Auto reconnecting to Hypixel after bad connection.");
+		}
 	}
 
 	private void reportModStatus(String status, String source) {
@@ -481,7 +512,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		client.execute(() -> {
 			if (actions != null) {
 				if (isReconnectSuppressedDisconnectReason(disconnectReason)) {
-					suppressBadConnectionReconnect(System.currentTimeMillis());
+					activateReconnectSafetyHold(disconnectReason);
 					sendRemoteClientLog("warn", "Remote disconnect suppressing reconnect: " + disconnectReason);
 				}
 				disconnectIntentionally(client, disconnectReason);
@@ -555,6 +586,7 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void reconnectHypixelFromRemote(Minecraft client) {
 		badConnectionReconnectController.clearPendingReconnect();
+		clearReconnectSafetyHold("remote reconnect");
 		actions.connectToServer(client, "mc.hypixel.net");
 		sendRemoteClientLog("info", "Remote Hypixel reconnect requested.");
 	}
@@ -753,18 +785,21 @@ public class AutoauctionClient implements ClientModInitializer {
 			pendingHandoff.reconnectStarted = true;
 			pendingHandoff.reconnectStartedAt = System.currentTimeMillis();
 			Autoauction.LOGGER.info("AutoAuction handoff switched to {}; reconnecting to Hypixel.", currentUsername);
-			actions.connectToServer(client, "mc.hypixel.net");
+			if (!connectToHypixelIfAllowed(client, "Handoff reconnect")) {
+				pendingHandoff = null;
+				workflowStarted = false;
+			}
 			return;
 		}
 
-		if (!isLoadedOnHypixelSkyBlock(client)) {
+		if (!readyForHandoffMacroStart(client, pendingHandoff.reconnectStartedAt, System.currentTimeMillis())) {
 			pendingHandoff.hypixelReadyAt = 0L;
 			return;
 		}
 
 		if (pendingHandoff.hypixelReadyAt == 0L) {
 			pendingHandoff.hypixelReadyAt = System.currentTimeMillis();
-			Autoauction.LOGGER.info("AutoAuction handoff loaded into SkyBlock as {}; waiting before macro start.", currentUsername);
+			Autoauction.LOGGER.info("AutoAuction handoff loaded into Hypixel as {}; waiting before macro start.", currentUsername);
 			return;
 		}
 		if (!hypixelReadyDelayElapsed(pendingHandoff.hypixelReadyAt, System.currentTimeMillis())) {
@@ -803,11 +838,14 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			stop.reconnectStarted = true;
+			stop.reconnectStartedAt = now;
 			Autoauction.LOGGER.info("AutoAuction handoff policy stop timer elapsed; reconnecting to Hypixel.");
-			actions.connectToServer(client, "mc.hypixel.net");
+			if (!connectToHypixelIfAllowed(client, "Handoff policy stop reconnect")) {
+				pendingHandoffPolicyStop = null;
+			}
 			return;
 		}
-		if (!isLoadedOnHypixelSkyBlock(client)) {
+		if (!readyForHandoffMacroStart(client, stop.reconnectStartedAt, now)) {
 			stop.hypixelReadyAt = 0L;
 			return;
 		}
@@ -839,6 +877,10 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private void handleScheduledStart(Minecraft client) {
 		if (pendingScheduledStart != null) {
+			if (reconnectSafetyHold) {
+				pendingScheduledStart = null;
+				return;
+			}
 			pendingScheduledStart.tick(client);
 			return;
 		}
@@ -861,6 +903,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				if (workflowBusyForScheduledStart()) {
 					return;
 				}
+				if (reconnectSafetyHold) {
+					return;
+				}
 				pendingScheduledStart = new PendingScheduledStart(entry);
 				sendRemoteClientLog("info", "Scheduler start time is due (" + entry.rawInput()
 					+ "); preparing Hypixel reconnect.");
@@ -879,7 +924,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		if (scheduledStartAt <= 0L || scheduledStartAt == failedScheduledStartAtEpochMs) {
 			return;
 		}
-		if (!shouldStartScheduledScheduler(scheduledStartAt, now, workflowBusyForScheduledStart())) {
+		if (!shouldStartScheduledScheduler(scheduledStartAt, now, workflowBusyForScheduledStart(), reconnectSafetyHold)) {
 			return;
 		}
 		pendingScheduledStart = new PendingScheduledStart(scheduledStartAt);
@@ -931,6 +976,14 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private boolean isLoadedOnHypixelSkyBlock(Minecraft client) {
 		return isLoadedOnHypixel(client) && SkyBlockStatus.hasSkyBlockScoreboard(readScoreboardLines(client));
+	}
+
+	private boolean readyForHandoffMacroStart(Minecraft client, long reconnectStartedAt, long now) {
+		if (!isLoadedOnHypixel(client)) {
+			return false;
+		}
+		return SkyBlockStatus.hasSkyBlockScoreboard(readScoreboardLines(client))
+			|| skyBlockFallbackDelayElapsed(reconnectStartedAt, now);
 	}
 
 	private String screenText(Screen screen) {
@@ -1551,13 +1604,9 @@ public class AutoauctionClient implements ClientModInitializer {
 	}
 
 	private void handleNebulaBanwaveDetected(String message) {
-		Minecraft client = Minecraft.getInstance();
 		String display = NebulaLatestLogWatcher.displayMessage(message);
-		sendRemoteDebugLog("warn", "nebula", "Banwave detected; disconnecting and suppressing reconnect. " + display);
-		suppressBadConnectionReconnect(System.currentTimeMillis());
-		if (actions != null && client.getConnection() != null) {
-			disconnectIntentionally(client, "AutoAuction Nebula banwave detected.");
-		}
+		sendRemoteDebugLog("warn", "nebula", "Banwave detected; suppressing reconnect. " + display);
+		activateReconnectSafetyHold("Nebula banwave");
 	}
 
 	private void sendAccountStatsIfNeeded(Minecraft client) {
@@ -4652,7 +4701,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				hypixelReadyAt = 0L;
 				if (!reconnectStarted) {
 					reconnectStarted = true;
-					actions.connectToServer(client, "mc.hypixel.net");
+					if (!connectToHypixelIfAllowed(client, "Scheduler delayed start reconnect")) {
+						pendingScheduledStart = null;
+						return;
+					}
 					sendRemoteClientLog("info", "Scheduler delayed start reconnecting to Hypixel.");
 				}
 				return;
@@ -5021,6 +5073,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private static final class PendingHandoffPolicyStop {
 		private final long reconnectAt;
 		private boolean reconnectStarted;
+		private long reconnectStartedAt;
 		private long hypixelReadyAt;
 
 		private PendingHandoffPolicyStop(long reconnectAt) {
@@ -5598,8 +5651,16 @@ public class AutoauctionClient implements ClientModInitializer {
 		return hypixelReadyAt > 0L && now - hypixelReadyAt >= HYPIXEL_READY_MACRO_DELAY_MS;
 	}
 
+	static boolean skyBlockFallbackDelayElapsed(long reconnectStartedAt, long now) {
+		return reconnectStartedAt > 0L && now - reconnectStartedAt >= SKYBLOCK_SCOREBOARD_FALLBACK_MS;
+	}
+
 	static boolean shouldStartScheduledScheduler(long scheduledStartAt, long now, boolean workflowBusy) {
-		return scheduledStartAt > 0L && now >= scheduledStartAt && !workflowBusy;
+		return shouldStartScheduledScheduler(scheduledStartAt, now, workflowBusy, false);
+	}
+
+	static boolean shouldStartScheduledScheduler(long scheduledStartAt, long now, boolean workflowBusy, boolean reconnectSafetyHold) {
+		return scheduledStartAt > 0L && now >= scheduledStartAt && !workflowBusy && !reconnectSafetyHold;
 	}
 
 	static int islandCommandCooldownDelayMs() {
