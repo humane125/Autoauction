@@ -37,7 +37,7 @@ public final class NebulaLatestLogWatcher {
 			String line;
 			while ((line = file.readLine()) != null) {
 				String decodedLine = decodeLogLine(line);
-				if (isNebulaMacroLine(decodedLine)) {
+				if (isNebulaMacroLine(decodedLine) || isNebulaBanwaveLine(decodedLine)) {
 					messages.add(decodedLine);
 				}
 			}
@@ -69,6 +69,14 @@ public final class NebulaLatestLogWatcher {
 		return normalized.contains("nebulaclient")
 			&& (normalized.contains("combatmacro:") || normalized.contains("combat macro:"))
 			&& (normalized.contains("enabled") || normalized.contains("disabled"));
+	}
+
+	public static boolean isNebulaBanwaveLine(String line) {
+		String normalized = normalize(line);
+		if (normalized.contains("autoauctiondebug/nebula")) {
+			return false;
+		}
+		return normalized.contains("nebulaclient") && normalized.contains("banwave");
 	}
 
 	public static String displayMessage(String line) {

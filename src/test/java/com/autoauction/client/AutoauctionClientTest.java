@@ -113,6 +113,17 @@ class AutoauctionClientTest {
 	}
 
 	@Test
+	void banLikeDisconnectReasonsSuppressReconnect() {
+		assertTrue(AutoauctionClient.isReconnectSuppressedDisconnectReason("NebulaClient detected ban wave"));
+		assertTrue(AutoauctionClient.isReconnectSuppressedDisconnectReason("NebulaClient detected banwave"));
+		assertTrue(AutoauctionClient.isReconnectSuppressedDisconnectReason("Ban detected on MacroOne"));
+		assertTrue(AutoauctionClient.isReconnectSuppressedDisconnectReason("You are permanently banned from this server!"));
+		assertTrue(AutoauctionClient.isReconnectSuppressedDisconnectReason("Watchdog Cheat Detection"));
+		assertFalse(AutoauctionClient.isReconnectSuppressedDisconnectReason("Timed out"));
+		assertFalse(AutoauctionClient.isReconnectSuppressedDisconnectReason("Connection reset"));
+	}
+
+	@Test
 	void remoteMacroStopSendsToggleWhenMacroIsKnownOn() {
 		NebulaMacroController controller = new NebulaMacroController();
 		controller.onChatMessage("[Nebula] Combat Macro enabled");

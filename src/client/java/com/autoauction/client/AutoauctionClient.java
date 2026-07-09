@@ -374,6 +374,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		ClientLoginConnectionEvents.DISCONNECT.register((handler, client) -> {
 			DisconnectionDetails details = disconnectionDetailsFrom(handler);
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
+				suppressBadConnectionReconnect(System.currentTimeMillis());
 				reportModBanStatus(details, "login disconnect");
 				return;
 			}
@@ -382,6 +383,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
 			DisconnectionDetails details = connectionDisconnectionDetails(handler.getConnection());
 			if (ModAccountStatusDetector.isHypixelBanScreen(details)) {
+				suppressBadConnectionReconnect(System.currentTimeMillis());
 				reportModBanStatus(details, "play disconnect");
 				return;
 			}
@@ -394,6 +396,11 @@ public class AutoauctionClient implements ClientModInitializer {
 		reportModStatus("active", source);
 		String reason = disconnectionReason(details);
 		long now = System.currentTimeMillis();
+		if (isReconnectSuppressedDisconnectReason(reason)) {
+			suppressBadConnectionReconnect(now);
+			sendRemoteClientLog("warn", "Reconnect suppressed after disconnect reason: " + reason);
+			return;
+		}
 		boolean scheduled = badConnectionReconnectController.scheduleIfBadConnection(
 			reason,
 			false,
@@ -417,6 +424,10 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	private String disconnectionReason(DisconnectionDetails details) {
 		return details == null || details.reason() == null ? "" : details.reason().getString();
+	}
+
+	private void suppressBadConnectionReconnect(long now) {
+		badConnectionReconnectController.suppressIntentionalDisconnects(now);
 	}
 
 	private void handlePendingBadConnectionReconnect(Minecraft client) {
@@ -469,6 +480,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			: reason;
 		client.execute(() -> {
 			if (actions != null) {
+				if (isReconnectSuppressedDisconnectReason(disconnectReason)) {
+					suppressBadConnectionReconnect(System.currentTimeMillis());
+					sendRemoteClientLog("warn", "Remote disconnect suppressing reconnect: " + disconnectReason);
+				}
 				disconnectIntentionally(client, disconnectReason);
 			}
 		});
@@ -742,15 +757,14 @@ public class AutoauctionClient implements ClientModInitializer {
 			return;
 		}
 
-		if (client.player == null || client.getCurrentServer() == null
-			|| !ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+		if (!isLoadedOnHypixelSkyBlock(client)) {
 			pendingHandoff.hypixelReadyAt = 0L;
 			return;
 		}
 
 		if (pendingHandoff.hypixelReadyAt == 0L) {
 			pendingHandoff.hypixelReadyAt = System.currentTimeMillis();
-			Autoauction.LOGGER.info("AutoAuction handoff loaded into Hypixel as {}; waiting before macro start.", currentUsername);
+			Autoauction.LOGGER.info("AutoAuction handoff loaded into SkyBlock as {}; waiting before macro start.", currentUsername);
 			return;
 		}
 		if (!hypixelReadyDelayElapsed(pendingHandoff.hypixelReadyAt, System.currentTimeMillis())) {
@@ -793,8 +807,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			actions.connectToServer(client, "mc.hypixel.net");
 			return;
 		}
-		if (client.player == null || client.getCurrentServer() == null
-			|| !ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip)) {
+		if (!isLoadedOnHypixelSkyBlock(client)) {
 			stop.hypixelReadyAt = 0L;
 			return;
 		}
@@ -914,6 +927,10 @@ public class AutoauctionClient implements ClientModInitializer {
 			&& client.player != null
 			&& client.getCurrentServer() != null
 			&& ModAccountStatusDetector.isHypixelServer(client.getCurrentServer().ip);
+	}
+
+	private boolean isLoadedOnHypixelSkyBlock(Minecraft client) {
+		return isLoadedOnHypixel(client) && SkyBlockStatus.hasSkyBlockScoreboard(readScoreboardLines(client));
 	}
 
 	private String screenText(Screen screen) {
@@ -1521,11 +1538,25 @@ public class AutoauctionClient implements ClientModInitializer {
 		nebulaLatestLogPollTicks = 0;
 		try {
 			for (String message : nebulaLatestLogWatcher.pollMacroMessages()) {
+				if (NebulaLatestLogWatcher.isNebulaBanwaveLine(message)) {
+					handleNebulaBanwaveDetected(message);
+					continue;
+				}
 				handleMacroChatMessage(message);
 				sendRemoteDebugLog("info", "nebula", NebulaLatestLogWatcher.displayMessage(message));
 			}
 		} catch (Exception error) {
 			Autoauction.LOGGER.debug("AutoAuction could not poll latest.log for Nebula macro messages", error);
+		}
+	}
+
+	private void handleNebulaBanwaveDetected(String message) {
+		Minecraft client = Minecraft.getInstance();
+		String display = NebulaLatestLogWatcher.displayMessage(message);
+		sendRemoteDebugLog("warn", "nebula", "Banwave detected; disconnecting and suppressing reconnect. " + display);
+		suppressBadConnectionReconnect(System.currentTimeMillis());
+		if (actions != null && client.getConnection() != null) {
+			disconnectIntentionally(client, "AutoAuction Nebula banwave detected.");
 		}
 	}
 
@@ -5583,6 +5614,19 @@ public class AutoauctionClient implements ClientModInitializer {
 	static boolean remoteActionRequiresContent(String actionType) {
 		String clean = String.valueOf(actionType == null ? "" : actionType).trim().toLowerCase(Locale.ROOT);
 		return List.of("client_command", "server_command", "text_message").contains(clean);
+	}
+
+	static boolean isReconnectSuppressedDisconnectReason(String reason) {
+		String normalized = String.valueOf(reason == null ? "" : reason)
+			.replaceAll("(?i)(?:\u00C2?\u00A7|&)[0-9A-FK-OR]", "")
+			.toLowerCase(Locale.ROOT);
+		String compact = normalized.replaceAll("\\s+", "");
+		return compact.contains("banwave")
+			|| normalized.contains("ban wave")
+			|| normalized.contains("ban detected")
+			|| normalized.contains("banned")
+			|| normalized.contains("security alert")
+			|| normalized.contains("watchdog");
 	}
 
 	static NebulaMacroController.EnsureResult requestRemoteMacroStop(
