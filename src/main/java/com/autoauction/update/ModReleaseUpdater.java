@@ -1,4 +1,4 @@
-package com.autoauction.client.update;
+package com.autoauction.update;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -30,6 +30,7 @@ public final class ModReleaseUpdater {
 		.connectTimeout(Duration.ofSeconds(10))
 		.build();
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
+	private static final String DOWNLOAD_TEMP_SUFFIX = ".download";
 
 	private ModReleaseUpdater() {
 	}
@@ -119,6 +120,10 @@ public final class ModReleaseUpdater {
 		return isSha256(currentSha256) && isSha256(releaseSha256) && !currentSha256.equalsIgnoreCase(releaseSha256);
 	}
 
+	static String downloadTempSuffix() {
+		return DOWNLOAD_TEMP_SUFFIX;
+	}
+
 	private static List<Release> fetchReleases(String apiBaseUrl, String apiKey) throws Exception {
 		HttpRequest request = HttpRequest.newBuilder()
 			.uri(releaseManifestUri(apiBaseUrl))
@@ -153,7 +158,7 @@ public final class ModReleaseUpdater {
 
 	private static Path downloadRelease(String apiBaseUrl, String apiKey, Release release, Path modsDir) throws Exception {
 		Files.createDirectories(modsDir);
-		Path temp = Files.createTempFile(modsDir, "mod-update-", ".jar");
+		Path temp = Files.createTempFile(modsDir, "mod-update-", DOWNLOAD_TEMP_SUFFIX);
 		HttpRequest request = HttpRequest.newBuilder()
 			.uri(resolveDownloadUri(apiBaseUrl, release.downloadUrl()))
 			.timeout(REQUEST_TIMEOUT)

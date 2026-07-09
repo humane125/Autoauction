@@ -1,4 +1,4 @@
-package com.autoauction.client.update;
+package com.autoauction.update;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,5 +37,10 @@ class ModReleaseUpdaterTest {
 		assertTrue(ModReleaseUpdater.shouldUpdate("a".repeat(64), "b".repeat(64)));
 		assertFalse(ModReleaseUpdater.shouldUpdate("a".repeat(64), "not-a-sha"));
 		assertFalse(ModReleaseUpdater.shouldUpdate("", "b".repeat(64)));
+	}
+
+	@Test
+	void temporaryDownloadsDoNotLookLikeLoadableJars() {
+		assertFalse(ModReleaseUpdater.downloadTempSuffix().endsWith(".jar"));
 	}
 }
