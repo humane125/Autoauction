@@ -855,9 +855,6 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			if (entry.stop()) {
-				if (client.player == null) {
-					return;
-				}
 				pendingScheduledStop = new PendingScheduledStop(entry);
 				sendRemoteClientLog("info", "Scheduler stop time is due (" + entry.rawInput()
 					+ "); stopping macro and disconnecting.");
@@ -4711,6 +4708,13 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			if (client.player == null) {
+				if (handoffClient.markScheduleTimeEntryClaimed(entry.id())) {
+					failedScheduleTimeEntryId = "";
+					failedScheduleTimeEntryAtMs = 0L;
+					sendRemoteClientLog("info", "Scheduler stop time claimed while already disconnected.");
+				} else {
+					fail("Alt Manager rejected scheduler stop claim while already disconnected.");
+				}
 				pendingScheduledStop = null;
 				return;
 			}
