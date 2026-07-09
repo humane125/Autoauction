@@ -22,7 +22,7 @@ public class Autoauction implements ModInitializer {
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution.
 
-		LOGGER.info("AutoAuction loaded with release updater");
+		LOGGER.info("AutoAuction loaded with prelaunch updater support");
 		ModUpdateConfig config = ModUpdateConfig.load(FabricLoader.getInstance().getConfigDir());
 		ModReleaseUpdater.checkForUpdateAsync(
 			MOD_ID,
