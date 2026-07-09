@@ -46,6 +46,7 @@ import com.autoauction.client.transfer.CoinAmountParser;
 import com.autoauction.client.transfer.EnderChestParkingPlan;
 import com.autoauction.client.transfer.HypixelBazaarClient;
 import com.autoauction.client.transfer.SenderParkingTracker;
+import com.autoauction.client.transfer.SenderPrearmGate;
 import com.autoauction.client.transfer.TransferAccountListRequests;
 import com.autoauction.client.transfer.TransferChatComponents;
 import com.autoauction.client.transfer.TransferCommandSuggestions;
@@ -192,6 +193,7 @@ public class AutoauctionClient implements ClientModInitializer {
 	private ReceiverSellOfferWorkflow receiverSellOfferWorkflow;
 	private SenderPrepareTransferWorkflow senderPrepareTransferWorkflow;
 	private SenderInstantSellWorkflow senderInstantSellWorkflow;
+	private SenderItemPagePrearmWorkflow senderItemPagePrearmWorkflow;
 	private SenderInstantBuyWorkflow senderInstantBuyWorkflow;
 	private SenderEnderChestRestoreWorkflow senderEnderChestRestoreWorkflow;
 	private ReceiverClaimSellOfferWorkflow receiverClaimSellOfferWorkflow;
@@ -296,6 +298,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				if (senderInstantSellWorkflow != null) {
 					senderInstantSellWorkflow.tick(client);
+				}
+				if (senderItemPagePrearmWorkflow != null) {
+					senderItemPagePrearmWorkflow.tick(client);
 				}
 				if (senderEnderChestRestoreWorkflow != null) {
 					senderEnderChestRestoreWorkflow.tick(client);
@@ -951,6 +956,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| receiverSellOfferWorkflow != null
 			|| senderPrepareTransferWorkflow != null
 			|| senderInstantSellWorkflow != null
+			|| senderItemPagePrearmWorkflow != null
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
@@ -1140,6 +1146,14 @@ public class AutoauctionClient implements ClientModInitializer {
 		});
 	}
 
+	private void startSenderItemPagePrearm(Minecraft client, String itemName) {
+		if (!transferController.canRunAsSender() || senderInstantBuyWorkflow != null) {
+			return;
+		}
+		senderItemPagePrearmWorkflow = new SenderItemPagePrearmWorkflow(itemName);
+		senderItemPagePrearmWorkflow.start(client);
+	}
+
 	private void handleCookieBuffRequired() {
 		long now = System.currentTimeMillis();
 		if (now - lastCookieBuffAlertAt < 30_000) {
@@ -1200,6 +1214,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				receiverSellOfferWorkflow = null;
 				senderPrepareTransferWorkflow = null;
 				senderInstantSellWorkflow = null;
+				senderItemPagePrearmWorkflow = null;
 				senderInstantBuyWorkflow = null;
 				senderEnderChestRestoreWorkflow = null;
 				receiverClaimSellOfferWorkflow = null;
@@ -1225,6 +1240,11 @@ public class AutoauctionClient implements ClientModInitializer {
 			@Override
 			public void onRunSent(ModSocketClient.TransferRun run) {
 				sendTransferFeedback(transferController.runSent(run.quantity()));
+				TransferController.Session session = toTransferSession(run.session());
+				Minecraft.getInstance().execute(() -> {
+					senderInstantSellWorkflow = new SenderInstantSellWorkflow(session.itemName(), run.quantity(), true);
+					senderInstantSellWorkflow.start(Minecraft.getInstance());
+				});
 			}
 
 			@Override
@@ -1233,6 +1253,10 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendRemoteClientLog("info", "Buy order ready: sender instant-selling " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback("AutoAuction transfer buy order ready: selling " + run.quantity() + "x " + session.itemName() + ".");
 				Minecraft.getInstance().execute(() -> {
+					if (senderInstantSellWorkflow != null && senderInstantSellWorkflow.matches(session.itemName(), run.quantity())) {
+						senderInstantSellWorkflow.markBuyOrderReady(Minecraft.getInstance());
+						return;
+					}
 					senderInstantSellWorkflow = new SenderInstantSellWorkflow(session.itemName(), run.quantity());
 					senderInstantSellWorkflow.start(Minecraft.getInstance());
 				});
@@ -1244,6 +1268,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				sendRemoteClientLog("info", "Sell offer ready: sender instant-buying " + run.quantity() + "x " + session.itemName());
 				sendTransferFeedback("AutoAuction transfer sell offer ready: buying " + run.quantity() + "x " + session.itemName() + ".");
 				Minecraft.getInstance().execute(() -> {
+					senderItemPagePrearmWorkflow = null;
 					senderInstantBuyWorkflow = new SenderInstantBuyWorkflow(session.itemName(), run.quantity());
 					senderInstantBuyWorkflow.start(Minecraft.getInstance());
 				});
@@ -1271,6 +1296,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				receiverSellOfferWorkflow = null;
 				senderPrepareTransferWorkflow = null;
 				senderInstantSellWorkflow = null;
+				senderItemPagePrearmWorkflow = null;
 				senderInstantBuyWorkflow = null;
 				senderEnderChestRestoreWorkflow = null;
 				receiverClaimSellOfferWorkflow = null;
@@ -1734,6 +1760,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| receiverSellOfferWorkflow != null
 			|| senderPrepareTransferWorkflow != null
 			|| senderInstantSellWorkflow != null
+			|| senderItemPagePrearmWorkflow != null
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
@@ -2577,6 +2604,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			|| receiverSellOfferWorkflow != null
 			|| senderPrepareTransferWorkflow != null
 			|| senderInstantSellWorkflow != null
+			|| senderItemPagePrearmWorkflow != null
 			|| senderInstantBuyWorkflow != null
 			|| senderEnderChestRestoreWorkflow != null
 			|| receiverClaimSellOfferWorkflow != null
@@ -3762,6 +3790,7 @@ public class AutoauctionClient implements ClientModInitializer {
 		OPEN_BAZAAR,
 		WAIT_PRIVATE_ISLAND,
 		WAIT_ITEM_PAGE,
+		WAIT_BUY_ORDER_READY,
 		CLICK_SELL_INSTANTLY,
 		WAIT_WARNING_OR_DONE,
 		CLICK_WARNING_CONFIRM,
@@ -4123,17 +4152,26 @@ public class AutoauctionClient implements ClientModInitializer {
 	private final class SenderInstantSellWorkflow {
 		private final String itemName;
 		private final int quantity;
+		private final boolean prearmOnly;
+		private final SenderPrearmGate prearmGate;
 		private SenderInstantSellState state = SenderInstantSellState.OPEN_BAZAAR;
 		private long nextActionAt;
 		private long stateStartedAt;
 
 		private SenderInstantSellWorkflow(String itemName, int quantity) {
+			this(itemName, quantity, false);
+		}
+
+		private SenderInstantSellWorkflow(String itemName, int quantity, boolean prearmOnly) {
 			this.itemName = itemName;
 			this.quantity = Math.max(1, quantity);
+			this.prearmOnly = prearmOnly;
+			this.prearmGate = prearmOnly ? new SenderPrearmGate() : null;
 		}
 
 		private void start(Minecraft client) {
-			debug(client, transferStep("sender", "instant-sell", quantity, itemName, "start selling into receiver buy order"));
+			debug(client, transferStep("sender", "instant-sell", quantity, itemName,
+				prearmOnly ? "prearm Bazaar item page before receiver buy order is ready" : "start selling into receiver buy order"));
 			transition(SenderInstantSellState.OPEN_BAZAAR, client);
 		}
 
@@ -4174,12 +4212,32 @@ public class AutoauctionClient implements ClientModInitializer {
 						}
 					}
 					if (BazaarTransferWorkflow.isItemPage(title, itemName)) {
+						if (prearmOnly) {
+							prearmGate.markScreenArmed();
+							debug(client, transferStep("sender", "instant-sell", quantity, itemName, "prearmed on item page; waiting for receiver buy order ready"));
+							transition(SenderInstantSellState.WAIT_BUY_ORDER_READY, client, 0);
+							return;
+						}
 						transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client);
 						return;
 					}
 					timeout(client, config.screenTimeoutMs(), "Bazaar item page did not open for sender " + itemName);
 				}
+				case WAIT_BUY_ORDER_READY -> {
+					if (!prearmOnly) {
+						transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client, 0);
+						return;
+					}
+					if (prearmGate.canFinalClick()) {
+						transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client, 0);
+						return;
+					}
+				}
 				case CLICK_SELL_INSTANTLY -> {
+					if (prearmOnly && !currentTransferSenderMatches(client)) {
+						fail(client, "sender account changed before prearmed instant sell could click");
+						return;
+					}
 					int slot = actions.findHandlerSlotByExactItemName(client, "Sell Instantly")
 						.orElse(BazaarTransferWorkflow.SELL_INSTANTLY_SLOT);
 					debug(client, transferStep("sender", "instant-sell", quantity, itemName, "click slot " + slot + " Sell Instantly"));
@@ -4214,6 +4272,25 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 		}
 
+		private boolean matches(String expectedItemName, int expectedQuantity) {
+			return itemName.equalsIgnoreCase(String.valueOf(expectedItemName == null ? "" : expectedItemName).trim())
+				&& quantity == Math.max(1, expectedQuantity);
+		}
+
+		private void markBuyOrderReady(Minecraft client) {
+			if (prearmGate != null) {
+				prearmGate.markReadySignal();
+			}
+			if (prearmOnly && state == SenderInstantSellState.WAIT_BUY_ORDER_READY && prearmGate.canFinalClick()) {
+				transition(SenderInstantSellState.CLICK_SELL_INSTANTLY, client, 0);
+			}
+		}
+
+		private boolean currentTransferSenderMatches(Minecraft client) {
+			TransferController.Session session = transferController.session();
+			return session != null && sameMinecraftUsername(currentUsername(client), session.senderUsername());
+		}
+
 		private void transition(SenderInstantSellState next, Minecraft client) {
 			transition(next, client, config.clickDelayMs());
 		}
@@ -4241,6 +4318,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			state = SenderInstantSellState.DONE;
 			senderInstantSellWorkflow = null;
 			sendDebugFeedback(client, message);
+			startSenderItemPagePrearm(client, itemName);
 		}
 
 		private void fail(Minecraft client, String message) {
@@ -4252,6 +4330,117 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 			notifyIssueAsync("transfer sender workflow failed: " + message);
 			startSenderEnderChestRestoreIfNeeded(client);
+		}
+
+		private String screenTitle(Minecraft client) {
+			return client.screen == null ? "" : client.screen.getTitle().getString();
+		}
+	}
+
+	private enum SenderItemPagePrearmState {
+		OPEN_BAZAAR,
+		WAIT_PRIVATE_ISLAND,
+		WAIT_ITEM_PAGE,
+		DONE,
+		ERROR
+	}
+
+	private final class SenderItemPagePrearmWorkflow {
+		private final String itemName;
+		private SenderItemPagePrearmState state = SenderItemPagePrearmState.OPEN_BAZAAR;
+		private long nextActionAt;
+		private long stateStartedAt;
+
+		private SenderItemPagePrearmWorkflow(String itemName) {
+			this.itemName = itemName;
+		}
+
+		private void start(Minecraft client) {
+			debug(client, transferStep("sender", "prearm-buy-page", 0, itemName, "open Bazaar item page before receiver sell offer is ready"));
+			transition(SenderItemPagePrearmState.OPEN_BAZAAR, client);
+		}
+
+		private void tick(Minecraft client) {
+			if (state == SenderItemPagePrearmState.DONE || state == SenderItemPagePrearmState.ERROR || System.currentTimeMillis() < nextActionAt) {
+				return;
+			}
+			try {
+				runState(client);
+			} catch (Exception e) {
+				fail(client, e.getMessage());
+			}
+		}
+
+		private void runState(Minecraft client) {
+			switch (state) {
+				case OPEN_BAZAAR -> {
+					if (sendIslandWarpIfNeeded(client, "sender item-page prearm")) {
+						transition(SenderItemPagePrearmState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
+						return;
+					}
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(SenderItemPagePrearmState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_PRIVATE_ISLAND -> {
+					actions.sendChatCommand(client, "/bz " + itemName);
+					transition(SenderItemPagePrearmState.WAIT_ITEM_PAGE, client);
+				}
+				case WAIT_ITEM_PAGE -> {
+					String title = screenTitle(client);
+					if (BazaarTransferWorkflow.isBazaarResultScreen(title)) {
+						Optional<Integer> itemSlot = actions.findHandlerSlotByExactItemName(client, itemName);
+						if (itemSlot.isPresent()) {
+							debug(client, transferStep("sender", "prearm-buy-page", 0, itemName, "click slot " + itemSlot.get() + " Bazaar search result"));
+							actions.clickSlot(client, itemSlot.get());
+							transition(SenderItemPagePrearmState.WAIT_ITEM_PAGE, client);
+							return;
+						}
+					}
+					if (BazaarTransferWorkflow.isItemPage(title, itemName)) {
+						done(client, transferStep("sender", "prearm-buy-page", 0, itemName, "item page ready; waiting for receiver sell offer ready"));
+						return;
+					}
+					timeout(client, config.screenTimeoutMs(), "Bazaar item page did not open for sender prearm " + itemName);
+				}
+				case DONE, ERROR -> {
+				}
+			}
+		}
+
+		private void transition(SenderItemPagePrearmState next, Minecraft client) {
+			transition(next, client, config.clickDelayMs());
+		}
+
+		private void transition(SenderItemPagePrearmState next, Minecraft client, int delayMs) {
+			state = next;
+			stateStartedAt = System.currentTimeMillis();
+			nextActionAt = stateStartedAt + Math.max(MIN_CLICK_DELAY_MS, delayMs);
+			if (isDebugEnabled()) {
+				Autoauction.LOGGER.info(transferState("sender", "prearm-buy-page", next.name(), 0, itemName, delayMs));
+			}
+		}
+
+		private void debug(Minecraft client, String message) {
+			sendDebugFeedback(client, message);
+		}
+
+		private void timeout(Minecraft client, int timeoutMs, String message) {
+			if (System.currentTimeMillis() - stateStartedAt > timeoutMs) {
+				fail(client, message);
+			}
+		}
+
+		private void done(Minecraft client, String message) {
+			state = SenderItemPagePrearmState.DONE;
+			senderItemPagePrearmWorkflow = null;
+			sendDebugFeedback(client, message);
+		}
+
+		private void fail(Minecraft client, String message) {
+			state = SenderItemPagePrearmState.ERROR;
+			senderItemPagePrearmWorkflow = null;
+			Autoauction.LOGGER.warn("AutoAuction transfer sender item-page prearm failed: {}", message);
+			sendDebugFeedback(client, "AutoAuction transfer sender item-page prearm failed: " + message);
 		}
 
 		private String screenTitle(Minecraft client) {
@@ -4315,6 +4504,10 @@ public class AutoauctionClient implements ClientModInitializer {
 		private void runState(Minecraft client) {
 			switch (state) {
 				case OPEN_BAZAAR -> {
+					if (BazaarTransferWorkflow.isItemPage(screenTitle(client), itemName)) {
+						transition(SenderInstantBuyState.CLICK_BUY_INSTANTLY, client, 0);
+						return;
+					}
 					if (sendIslandWarpIfNeeded(client, "sender instant buy")) {
 						transition(SenderInstantBuyState.WAIT_PRIVATE_ISLAND, client, islandCommandCooldownDelayMs());
 						return;
