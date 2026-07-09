@@ -215,6 +215,8 @@ public class AutoauctionClient implements ClientModInitializer {
 	private PendingScheduledStop pendingScheduledStop;
 	private long failedScheduledStartAtEpochMs;
 	private String failedScheduleTimeEntryId = "";
+	private long failedScheduleTimeEntryAtMs;
+	private static final long SCHEDULE_TIME_ENTRY_RETRY_DELAY_MS = 60_000L;
 	private final HandoffPolicyTriggerGuard handoffPolicyTriggerGuard = new HandoffPolicyTriggerGuard();
 	private String suppressedSchedulerCraftReforgeKey = "";
 	private long suppressedSchedulerCraftReforgeUntilMs;
@@ -262,6 +264,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				handlePendingHandoff(client);
 				handlePendingHandoffPolicyStop(client);
 				handleScheduledStart(client);
+				if (pendingScheduledStart != null || pendingScheduledStop != null) {
+					return;
+				}
 				if (client.player == null || controller == null || actions == null) {
 					return;
 				}
@@ -836,13 +841,13 @@ public class AutoauctionClient implements ClientModInitializer {
 			handoffClient.currentDueScheduleTimeEntry();
 		if (dueEntry.isPresent()) {
 			AltManagerHandoffClient.ScheduleTimeEntrySnapshot entry = dueEntry.get();
-			if (entry.id().equals(failedScheduleTimeEntryId)) {
-				return;
-			}
-			if (workflowBusyForScheduledStart()) {
+			if (recentlyFailedScheduleTimeEntry(entry.id(), now)) {
 				return;
 			}
 			if (entry.start()) {
+				if (workflowBusyForScheduledStart()) {
+					return;
+				}
 				pendingScheduledStart = new PendingScheduledStart(entry);
 				sendRemoteClientLog("info", "Scheduler start time is due (" + entry.rawInput()
 					+ "); preparing Hypixel reconnect.");
@@ -850,6 +855,9 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			if (entry.stop()) {
+				if (client.player == null) {
+					return;
+				}
 				pendingScheduledStop = new PendingScheduledStop(entry);
 				sendRemoteClientLog("info", "Scheduler stop time is due (" + entry.rawInput()
 					+ "); stopping macro and disconnecting.");
@@ -867,6 +875,18 @@ public class AutoauctionClient implements ClientModInitializer {
 		pendingScheduledStart = new PendingScheduledStart(scheduledStartAt);
 		sendRemoteClientLog("info", "Scheduler delayed start is due; preparing Hypixel reconnect.");
 		pendingScheduledStart.tick(client);
+	}
+
+	private boolean recentlyFailedScheduleTimeEntry(String id, long now) {
+		if (id == null || id.isBlank() || !id.equals(failedScheduleTimeEntryId)) {
+			return false;
+		}
+		if (now - failedScheduleTimeEntryAtMs < SCHEDULE_TIME_ENTRY_RETRY_DELAY_MS) {
+			return true;
+		}
+		failedScheduleTimeEntryId = "";
+		failedScheduleTimeEntryAtMs = 0L;
+		return false;
 	}
 
 	private boolean workflowBusyForScheduledStart() {
@@ -4588,6 +4608,18 @@ public class AutoauctionClient implements ClientModInitializer {
 				fail("scheduler delayed start timed out.");
 				return;
 			}
+			if (!claimed) {
+				String username = currentUsername(client);
+				if (!claim(username)) {
+					skip("Scheduler delayed start skipped; time entry was already claimed or is no longer due.");
+					return;
+				}
+				claimed = true;
+				failedScheduledStartAtEpochMs = 0L;
+				failedScheduleTimeEntryId = "";
+				failedScheduleTimeEntryAtMs = 0L;
+				sendRemoteClientLog("info", "Scheduler delayed start claimed for " + username + ".");
+			}
 			if (!isLoadedOnHypixel(client)) {
 				hypixelReadyAt = 0L;
 				if (!reconnectStarted) {
@@ -4604,17 +4636,6 @@ public class AutoauctionClient implements ClientModInitializer {
 			}
 			if (!hypixelReadyDelayElapsed(hypixelReadyAt, now)) {
 				return;
-			}
-			if (!claimed) {
-				String username = currentUsername(client);
-				if (!claim(username)) {
-					fail("Alt Manager rejected delayed scheduler start claim for " + claimTarget(username) + ".");
-					return;
-				}
-				claimed = true;
-				failedScheduledStartAtEpochMs = 0L;
-				failedScheduleTimeEntryId = "";
-				sendRemoteClientLog("info", "Scheduler delayed start claimed for " + username + ".");
 			}
 			NebulaMacroController.EnsureResult macroStart = macroController.ensureOn(
 				command -> runMacroToggleCommand(client, command),
@@ -4648,12 +4669,22 @@ public class AutoauctionClient implements ClientModInitializer {
 			return username;
 		}
 
+		private void skip(String message) {
+			Autoauction.LOGGER.info("{}", message);
+			sendRemoteClientLog("info", message);
+			if (timeEntryId.isBlank()) {
+				failedScheduledStartAtEpochMs = scheduledStartAt;
+			}
+			pendingScheduledStart = null;
+		}
+
 		private void fail(String message) {
 			Autoauction.LOGGER.warn("AutoAuction scheduled start failed: {}", message);
 			sendRemoteClientLog("error", "Scheduler delayed start failed: " + message);
 			notifyIssueAsync("scheduler delayed start failed: " + message);
 			if (!timeEntryId.isBlank()) {
 				failedScheduleTimeEntryId = timeEntryId;
+				failedScheduleTimeEntryAtMs = System.currentTimeMillis();
 			} else {
 				failedScheduledStartAtEpochMs = scheduledStartAt;
 			}
@@ -4680,20 +4711,19 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			if (client.player == null) {
-				if (handoffClient.markScheduleTimeEntryClaimed(entry.id())) {
-					failedScheduleTimeEntryId = "";
-					sendRemoteClientLog("info", "Scheduler stop time claimed while already disconnected.");
-				} else {
-					fail("Alt Manager rejected scheduler stop claim while already disconnected.");
-				}
 				pendingScheduledStop = null;
 				return;
 			}
 			if (state == State.RETURN_ISLAND) {
-				actions.sendChatCommand(client, "is");
-				islandCommandSentAt = now;
-				state = State.WAIT_ISLAND;
-				sendRemoteClientLog("info", "Scheduler stop returned to island before disconnect.");
+				if (SkyBlockStatus.hasSkyBlockScoreboard(readScoreboardLines(client))) {
+					actions.sendChatCommand(client, "is");
+					islandCommandSentAt = now;
+					state = State.WAIT_ISLAND;
+					sendRemoteClientLog("info", "Scheduler stop returned to island before disconnect.");
+				} else {
+					sendRemoteClientLog("info", "Scheduler stop skipping /is because SkyBlock scoreboard is not visible.");
+					claimAndDisconnect(client);
+				}
 				return;
 			}
 			if (state == State.WAIT_ISLAND) {
@@ -4723,6 +4753,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				return;
 			}
 			failedScheduleTimeEntryId = "";
+			failedScheduleTimeEntryAtMs = 0L;
 			controller.stop();
 			workflowStarted = false;
 			disconnectIntentionally(client, "AutoAuction scheduler stop time reached.");
@@ -4735,6 +4766,7 @@ public class AutoauctionClient implements ClientModInitializer {
 			sendRemoteClientLog("error", "Scheduler stop failed: " + message);
 			notifyIssueAsync("scheduler stop failed: " + message);
 			failedScheduleTimeEntryId = entry.id();
+			failedScheduleTimeEntryAtMs = System.currentTimeMillis();
 			pendingScheduledStop = null;
 		}
 
