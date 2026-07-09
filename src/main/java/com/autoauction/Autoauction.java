@@ -19,6 +19,6 @@ public class Autoauction implements ModInitializer {
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution.
 
-		LOGGER.info("AutoAuction loaded");
+		LOGGER.info("AutoAuction loaded with release updater");
 	}
 }
