@@ -90,6 +90,26 @@ class ModSocketClientTest {
 	}
 
 	@Test
+	void ignoresTextFromPreviousSocketAfterUsernameChanges() {
+		FakeTransport transport = new FakeTransport();
+		List<String> disconnectReasons = new ArrayList<>();
+		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
+		ModSocketClient client = new ModSocketClient(config, transport, 30_000, message -> {}, disconnectReasons::add);
+
+		client.ensureStartedFor("FirstPlayer", "1.0.0");
+		transport.open();
+		client.ensureStartedFor("SecondPlayer", "1.0.0");
+		transport.open();
+
+		transport.message(0, "{\"type\":\"disconnect_now\",\"reason\":\"stale connection\"}");
+		assertTrue(disconnectReasons.isEmpty());
+
+		transport.message(1, "{\"type\":\"disconnect_now\",\"reason\":\"current connection\"}");
+		assertEquals(List.of("current connection"), disconnectReasons);
+		client.close();
+	}
+
+	@Test
 	void doesNotStartDuplicateSocketWhileConnectionIsPending() {
 		FakeTransport transport = new FakeTransport();
 		AutoAuctionConfig config = config("http://127.0.0.1:3000", "hpx_test_mod");
@@ -717,6 +737,10 @@ class ModSocketClientTest {
 
 		void message(String text) {
 			listener.onText(text);
+		}
+
+		void message(int index, String text) {
+			listeners.get(index).onText(text);
 		}
 
 		void error(Throwable error) {

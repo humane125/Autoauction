@@ -4699,7 +4699,7 @@ public class AutoauctionClient implements ClientModInitializer {
 				}
 				case WAIT_PURSE_UPDATE -> {
 					Optional<TransferPurseTracker.Summary> preview = transferPurseTracker.preview(currentPurse(client));
-					if (preview.isPresent() && preview.get().delta() >= 0) {
+					if (preview.isPresent() && hasPositivePurseProgress(preview.get())) {
 						Optional<TransferPurseTracker.Summary> summary = finishTransferPurseTracking(client);
 						long delta = summary.map(TransferPurseTracker.Summary::delta).orElse(0L);
 						if (!modSocketClient.cycleComplete(quantity, summary.map(TransferPurseTracker.Summary::before).orElse(0L), summary.map(TransferPurseTracker.Summary::after).orElse(0L), delta)) {
@@ -5836,6 +5836,10 @@ public class AutoauctionClient implements ClientModInitializer {
 
 	static int bazaarCloseDelayMs() {
 		return BAZAAR_CLOSE_DELAY_MS;
+	}
+
+	static boolean hasPositivePurseProgress(TransferPurseTracker.Summary summary) {
+		return summary != null && summary.delta() > 0;
 	}
 
 	static boolean handoffPolicyCanRun(AutomationState state, AccountStatsSnapshot snapshot) {

@@ -6,6 +6,7 @@ import com.autoauction.client.automation.AutomationState;
 import com.autoauction.client.handoff.HandoffPolicySnapshot;
 import com.autoauction.client.macro.NebulaMacroController;
 import com.autoauction.client.stats.AccountStatsSnapshot;
+import com.autoauction.client.transfer.TransferPurseTracker;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumMap;
@@ -164,6 +165,19 @@ class AutoauctionClientTest {
 	@Test
 	void waitsOneSecondAfterClosingBazaarBeforeRemovingArmor() {
 		assertEquals(1_000, AutoauctionClient.bazaarCloseDelayMs());
+	}
+
+	@Test
+	void receiverClaimRequiresPositivePurseProgress() {
+		assertFalse(AutoauctionClient.hasPositivePurseProgress(
+			new TransferPurseTracker.Summary("receiver", 1_000_000L, 999_999L, -1L)
+		));
+		assertFalse(AutoauctionClient.hasPositivePurseProgress(
+			new TransferPurseTracker.Summary("receiver", 1_000_000L, 1_000_000L, 0L)
+		));
+		assertTrue(AutoauctionClient.hasPositivePurseProgress(
+			new TransferPurseTracker.Summary("receiver", 1_000_000L, 1_000_001L, 1L)
+		));
 	}
 
 	@Test

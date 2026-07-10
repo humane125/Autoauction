@@ -279,6 +279,8 @@ public final class ModSocketClient implements AutoCloseable {
 		connectingUsername = username;
 		scheduleConnectTimeout(generation);
 		CompletableFuture<Connection> connectionFuture = transport.connect(uri, new Listener() {
+			private Connection listenerConnection;
+
 			@Override
 			public void onOpen(Connection openedConnection) {
 				synchronized (ModSocketClient.this) {
@@ -286,6 +288,7 @@ public final class ModSocketClient implements AutoCloseable {
 						openedConnection.close();
 						return;
 					}
+					listenerConnection = openedConnection;
 					connection = openedConnection;
 					connectedUsername = username;
 					connectingUsername = null;
@@ -299,7 +302,12 @@ public final class ModSocketClient implements AutoCloseable {
 
 			@Override
 			public void onText(String text) {
-				handleMessage(text);
+				synchronized (ModSocketClient.this) {
+					if (generation != connectionGeneration || listenerConnection == null || listenerConnection != connection) {
+						return;
+					}
+					handleMessage(text);
+				}
 			}
 
 			@Override
